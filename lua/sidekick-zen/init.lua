@@ -28,6 +28,9 @@ M.config = {
   keys = {
     code = "<C-h>", -- show the code view
     cli = "<C-l>", -- show the CLI view
+    -- Exit zen from normal mode in either view. Shadows macro recording
+    -- while zen is active; set to false if you record macros in zen.
+    exit = "q",
   },
   -- Remap sidekick's hide keys (`q` and `<c-.>`) on the CLI buffer to
   -- "switch to code view" while zen is active, so they don't tear the
@@ -245,6 +248,10 @@ local function enter()
   local cfg = float_cfg(g, entry == "code")
   cfg.style = "minimal"
   local code_win = vim.api.nvim_open_win(vim.api.nvim_win_get_buf(origin), false, cfg)
+  -- Snacks pickers exclude floats when resolving their "main" window and
+  -- would open files in the hidden origin split; this marker whitelists the
+  -- zen float (same trick as Snacks.zen itself).
+  vim.w[code_win].snacks_main = true
   vim.wo[code_win].winhighlight =
     "NormalFloat:SidekickZenBg,FloatBorder:SidekickZenBg,EndOfBuffer:SidekickZenBg,SignColumn:SidekickZenBg"
   vim.api.nvim_win_call(code_win, function()
@@ -259,6 +266,30 @@ local function enter()
     term = term,
     watchers = { watch(code_win) },
   }
+
+  -- Fallback for openers that still target a "real" window: if a buffer
+  -- lands in the hidden origin window, adopt it into the code view and pull
+  -- focus back above the backdrop.
+  table.insert(
+    ws.watchers,
+    vim.api.nvim_create_autocmd("BufWinEnter", {
+      group = group,
+      callback = function(ev)
+        if not ws or vim.api.nvim_get_current_win() ~= ws.origin then
+          return
+        end
+        if not vim.api.nvim_win_is_valid(ws.code_win) then
+          return
+        end
+        vim.api.nvim_win_set_buf(ws.code_win, ev.buf)
+        if ws.view ~= "code" then
+          switch("code")
+        else
+          vim.api.nvim_set_current_win(ws.code_win)
+        end
+      end,
+    })
+  )
 
   -- CLI view: re-open the sidekick terminal as a zen float. The blank title
   -- overrides sidekick's default " Sidekick " (nvim rejects a title without
@@ -285,12 +316,19 @@ local function enter()
       switch("cli")
     end, { desc = "Zen: CLI view" })
   end
+  if M.config.keys.exit then
+    push_map("n", M.config.keys.exit, function()
+      M.exit()
+    end, { desc = "Zen: exit" })
+  end
   if term and term:buf_valid() then
-    -- Sidekick's hide keys switch views instead of tearing zen down.
+    -- Sidekick's hide keys exit zen / switch views instead of hiding the
+    -- terminal mid-workspace. q needs the buffer-local override because
+    -- sidekick's own buffer-local q (hide) shadows the global exit map.
     if M.config.hijack_hide_keys then
       push_map("n", "q", function()
-        switch("code")
-      end, { buffer = term.buf, desc = "Zen: code view" })
+        M.exit()
+      end, { buffer = term.buf, desc = "Zen: exit" })
       for _, mode in ipairs({ "n", "t" }) do
         push_map(mode, "<c-.>", function()
           switch("code")

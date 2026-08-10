@@ -47,6 +47,8 @@ Needs Neovim 0.10+ and sidekick.nvim (works without it too, you just get code-on
 
 Enter from code and you see code first. Enter from the sidekick window and you land on the CLI, cursor in its input box. `:SidekickZen` toggles too.
 
+Sidekick's own keymaps play along: sending `{this}`, `{file}`, or a selection, picking a prompt, or focusing the CLI all raise the CLI view automatically, so the context lands where you can see it.
+
 ## Config
 
 These are the defaults:

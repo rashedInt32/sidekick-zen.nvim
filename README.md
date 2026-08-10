@@ -4,7 +4,7 @@ Zen mode that takes your AI along.
 
 One key drops your code and your [sidekick.nvim](https://github.com/folke/sidekick.nvim) CLI (Claude Code, Codex, Gemini, …) into a clean, centered, distraction-free view. `<C-h>` and `<C-l>` flip between them, and they work straight from the CLI's input box. No double-escape, no window juggling.
 
-<!-- demo.gif -->
+https://github.com/user-attachments/assets/d3b49d0d-c8cb-4ed0-8b4d-e44eb7f6fc1c
 
 ## Why another zen plugin?
 

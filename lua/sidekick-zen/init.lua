@@ -343,6 +343,25 @@ local function enter()
     end
   end
 
+  -- Sidekick's own actions (send {this}/{file}/{selection}, prompt, focus)
+  -- show+focus the terminal window directly. During zen that window is the
+  -- hidden CLI float, so focusing it would land below the backdrop; raise
+  -- the CLI view instead, as if the user pressed keys.cli.
+  table.insert(
+    ws.watchers,
+    vim.api.nvim_create_autocmd("WinEnter", {
+      group = group,
+      callback = function()
+        if not ws or ws.view == "cli" then
+          return
+        end
+        if vim.api.nvim_get_current_win() == cli_win() then
+          switch("cli")
+        end
+      end,
+    })
+  )
+
   -- Switch keys swap views instead of walking (hidden) splits.
   for _, mode in ipairs({ "n", "t" }) do
     push_map(mode, M.config.keys.code, function()

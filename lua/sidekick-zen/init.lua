@@ -264,8 +264,36 @@ local function enter()
     code_win = code_win,
     backdrop = open_backdrop(),
     term = term,
+    last_buf = vim.api.nvim_win_get_buf(origin),
     watchers = { watch(code_win) },
   }
+
+  -- A fresh float has no per-buffer view memory, so a file opened here lands
+  -- on its remembered cursor line at an arbitrary window row (often showing
+  -- the file's tail). Center once the position settles; the schedule lets
+  -- last-position autocmds (BufReadPost) move the cursor first.
+  table.insert(
+    ws.watchers,
+    vim.api.nvim_create_autocmd("BufWinEnter", {
+      group = group,
+      callback = function(ev)
+        if not ws or not vim.api.nvim_win_is_valid(ws.code_win) then
+          return
+        end
+        if vim.api.nvim_get_current_win() ~= ws.code_win or ev.buf == ws.last_buf then
+          return
+        end
+        ws.last_buf = ev.buf
+        vim.schedule(function()
+          if ws and vim.api.nvim_win_is_valid(ws.code_win) and vim.api.nvim_win_get_buf(ws.code_win) == ev.buf then
+            vim.api.nvim_win_call(ws.code_win, function()
+              vim.cmd("normal! zvzz")
+            end)
+          end
+        end)
+      end,
+    })
+  )
 
   -- Fallback for openers that still target a "real" window: if a buffer
   -- lands in the hidden origin window, adopt it into the code view and pull
@@ -281,7 +309,15 @@ local function enter()
         if not vim.api.nvim_win_is_valid(ws.code_win) then
           return
         end
+        -- The opener placed the cursor in the origin window; carry it over,
+        -- since set_buf would otherwise clamp the float's stale cursor.
+        local cur = vim.api.nvim_win_get_cursor(ws.origin)
         vim.api.nvim_win_set_buf(ws.code_win, ev.buf)
+        ws.last_buf = ev.buf
+        pcall(vim.api.nvim_win_set_cursor, ws.code_win, cur)
+        vim.api.nvim_win_call(ws.code_win, function()
+          vim.cmd("normal! zvzz")
+        end)
         if ws.view ~= "code" then
           switch("code")
         else

@@ -40,21 +40,35 @@ M.config = {
 
 local Z = { top = 50, backdrop = 40, hidden = 30 }
 
+-- Sidekick clamps its own floats to this minimum (cli/terminal.lua), so a
+-- smaller request would leave the CLI float wider than the geometry we push
+-- on every later swap -- and resize the PTY. Clamp to the same floor.
+local MIN = { width = 80, height = 10 }
+
+-- Never adopted as an origin when we're only guessing: cloning a sidebar or
+-- quickfix buffer into the code float is wrong, and exit would write the zen
+-- buffer back into that window.
+local DENY_BUFTYPE = { nofile = true, quickfix = true, help = true, prompt = true, terminal = true }
+
 ---@class sidekick.zen.Workspace
 ---@field view "code"|"cli"
----@field origin integer original code window (stays behind the backdrop)
+---@field origin? integer window the code view mirrors (nil if none was usable)
+---@field placeholder? integer scratch buffer of an origin window zen invented
 ---@field code_win integer
 ---@field backdrop integer
+---@field last_buf integer buffer last seen in the code view
 ---@field term? sidekick.cli.Terminal
 ---@field term_was_open? boolean
 ---@field saved? { layout: string, float: vim.api.keyset.win_config }
----@field watchers integer[]
 
 ---@type sidekick.zen.Workspace?
 local ws = nil
 
 local initialized = false
 local group = vim.api.nvim_create_augroup("sidekick_zen", { clear = true })
+-- Everything registered while a workspace is open lives here, so teardown is
+-- a single clear instead of tracking ids.
+local ws_group = vim.api.nvim_create_augroup("sidekick_zen_ws", { clear = true })
 
 local function editor_height()
   return vim.o.lines - vim.o.cmdheight - (vim.o.laststatus > 0 and 1 or 0)
@@ -62,9 +76,11 @@ end
 
 local function geo()
   local width = M.config.width <= 1 and math.floor(vim.o.columns * M.config.width) or M.config.width
+  width = math.min(math.max(width, MIN.width), vim.o.columns)
+  local height = math.max(editor_height() - 2, MIN.height) -- minus the two solid border rows
   return {
     width = width,
-    height = editor_height() - 2, -- minus the two solid border rows
+    height = height,
     row = 0,
     col = math.floor((vim.o.columns - width) / 2),
   }
@@ -83,6 +99,22 @@ local function float_cfg(g, visible)
   }
 end
 
+-- The blank title overrides sidekick's default " Sidekick " (nvim rejects a
+-- title without a border, so it can't simply be dropped).
+local function cli_float_cfg(g, visible)
+  return vim.tbl_extend("force", float_cfg(g, visible), { title = " " })
+end
+
+local function backdrop_cfg()
+  return {
+    relative = "editor",
+    row = 0,
+    col = 0,
+    width = vim.o.columns,
+    height = math.max(editor_height(), 1),
+  }
+end
+
 local function define_bg()
   if vim.fn.hlexists("SidekickZenBg") == 1 and not vim.api.nvim_get_hl(0, { name = "SidekickZenBg" }).default then
     return -- user or colorscheme defined it explicitly
@@ -95,18 +127,22 @@ end
 local function open_backdrop()
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
-  local win = vim.api.nvim_open_win(buf, false, {
-    relative = "editor",
-    row = 0,
-    col = 0,
-    width = vim.o.columns,
-    height = math.max(editor_height(), 1),
+  local cfg = vim.tbl_extend("force", backdrop_cfg(), {
     style = "minimal",
     focusable = false,
     zindex = Z.backdrop,
   })
+  local win = vim.api.nvim_open_win(buf, false, cfg)
   vim.wo[win].winhighlight = "Normal:SidekickZenBg,NormalNC:SidekickZenBg,EndOfBuffer:SidekickZenBg"
   return win
+end
+
+-- A fresh float has no per-buffer view memory, so a restored cursor lands at
+-- an arbitrary window row, often showing the file's tail.
+local function center(win)
+  vim.api.nvim_win_call(win, function()
+    vim.cmd("normal! zvzz")
+  end)
 end
 
 -- Keymap overrides live only while zen is active. Save whatever they shadow
@@ -147,63 +183,84 @@ local function pop_maps()
   saved_maps = {}
 end
 
-local function terminals()
-  local ok, Terminal = pcall(require, "sidekick.cli.terminal")
-  return ok and Terminal or nil
-end
-
 -- The terminal to adopt: the current window's session if we're in one,
 -- otherwise the most recently used running session.
 local function find_term()
-  local Terminal = terminals()
-  if not Terminal then
+  local ok, Terminal = pcall(require, "sidekick.cli.terminal")
+  if not ok then
     return nil
   end
   local id = vim.w.sidekick_session_id
-  if id and Terminal.get(id) then
-    return Terminal.get(id)
+  local current = id and Terminal.get(id)
+  if current then
+    return current
   end
-  local sessions = vim.tbl_filter(function(t)
-    return t:is_running() and t:buf_valid()
-  end, Terminal.sessions())
-  table.sort(sessions, function(a, b)
-    return (a.atime or 0) > (b.atime or 0)
-  end)
-  return sessions[1]
+  local best ---@type sidekick.cli.Terminal?
+  for _, t in ipairs(Terminal.sessions()) do
+    if t:is_running() and t:buf_valid() and (not best or (t.atime or 0) > (best.atime or 0)) then
+      best = t
+    end
+  end
+  return best
+end
+
+local function code_win()
+  return ws and vim.api.nvim_win_is_valid(ws.code_win) and ws.code_win or nil
 end
 
 local function cli_win()
   return ws and ws.term and ws.term:win_valid() and ws.term.win or nil
 end
 
+-- Switching to the CLI needs a live process too. Sidekick keeps the window
+-- around for a few seconds after the job dies, and focusing it would re-run
+-- jobstart against the dirty buffer (E5108).
+local function cli_ready()
+  return cli_win() ~= nil and ws.term:is_running()
+end
+
+-- zindex is a pure function of ws.view, applied in one place.
+local function place()
+  if not ws then
+    return
+  end
+  local g = geo()
+  for _, item in ipairs({ { code_win(), "code" }, { cli_win(), "cli" } }) do
+    if item[1] then
+      vim.api.nvim_win_set_config(item[1], float_cfg(g, ws.view == item[2]))
+    end
+  end
+  -- Keep the terminal's own opts in sync, or a later show() would reopen the
+  -- float at enter-time geometry.
+  if ws.term and ws.saved then
+    ws.term.opts.float = cli_float_cfg(g, ws.view == "cli")
+  end
+end
+
 local function switch(view)
   if not ws or ws.view == view then
     return
   end
-  local cwin = cli_win()
-  if view == "cli" and not cwin then
+  if view == "cli" and not cli_ready() then
     vim.notify("No sidekick CLI session running", vim.log.levels.WARN, { title = "sidekick-zen" })
     return
   end
-  local g = geo()
+  local cw = code_win()
+  if not cw then
+    return -- teardown in flight; the WinClosed watcher owns it from here
+  end
+  ws.view = view
+  place()
   if view == "cli" then
-    vim.api.nvim_win_set_config(ws.code_win, float_cfg(g, false))
-    vim.api.nvim_win_set_config(cwin, float_cfg(g, true))
-    ws.view = view
     ws.term:focus() -- also enters insert in the CLI's input box
   else
-    if cwin then
-      vim.api.nvim_win_set_config(cwin, float_cfg(g, false))
-    end
-    vim.api.nvim_win_set_config(ws.code_win, float_cfg(g, true))
-    ws.view = view
-    vim.api.nvim_set_current_win(ws.code_win)
+    vim.api.nvim_set_current_win(cw)
   end
 end
 
 local function watch(win)
-  return vim.api.nvim_create_autocmd("WinClosed", {
-    group = group,
+  vim.api.nvim_create_autocmd("WinClosed", {
+    group = ws_group,
     pattern = tostring(win),
     once = true,
     callback = function()
@@ -218,159 +275,183 @@ local function watch(win)
   })
 end
 
+-- A window the code view can safely mirror: real, not floating, and not the
+-- CLI terminal itself (cloning that buffer would show the PTY in a second
+-- window and shrink it). `strict` also rejects sidebars and friends, applied
+-- only when we're guessing rather than following an explicit focus.
+local function usable_origin(win, term_buf, strict)
+  if not win or win == 0 or not vim.api.nvim_win_is_valid(win) then
+    return false
+  end
+  if vim.api.nvim_win_get_config(win).relative ~= "" then
+    return false
+  end
+  local buf = vim.api.nvim_win_get_buf(win)
+  if buf == term_buf or vim.bo[buf].buftype == "terminal" then
+    return false
+  end
+  return not strict or not DENY_BUFTYPE[vim.bo[buf].buftype]
+end
+
+local function pick_origin(term_buf)
+  local cur = vim.api.nvim_get_current_win()
+  if usable_origin(cur, term_buf, false) then
+    return cur
+  end
+  local candidates = { vim.fn.win_getid(vim.fn.winnr("#")) }
+  vim.list_extend(candidates, vim.api.nvim_tabpage_list_wins(0))
+  for _, win in ipairs(candidates) do
+    if usable_origin(win, term_buf, true) then
+      return win
+    end
+  end
+  return nil
+end
+
+local function map_views(buf)
+  for _, mode in ipairs({ "n", "t" }) do
+    push_map(mode, M.config.keys.code, function()
+      switch("code")
+    end, { buffer = buf, desc = "Zen: code view" })
+    push_map(mode, M.config.keys.cli, function()
+      switch("cli")
+    end, { buffer = buf, desc = "Zen: CLI view" })
+  end
+end
+
 local function enter()
+  vim.api.nvim_clear_autocmds({ group = ws_group })
+
   local term = find_term()
+  local term_buf = term and term:buf_valid() and term.buf or nil
   local entry = (vim.w.sidekick_session_id and term) and "cli" or "code"
 
-  -- Origin code window: current one, or the previous window when entering
-  -- from the sidekick split. It stays untouched behind the backdrop.
-  local origin = vim.api.nvim_get_current_win()
-  if entry == "cli" then
-    local prev = vim.fn.win_getid(vim.fn.winnr("#"))
-    origin = prev ~= 0 and vim.api.nvim_win_get_config(prev).relative == "" and prev or origin
-    if origin == vim.api.nvim_get_current_win() then
-      for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-        if w ~= origin and vim.api.nvim_win_get_config(w).relative == "" then
-          origin = w
-          break
-        end
-      end
-    end
+  -- The window the code view mirrors. It stays untouched behind the backdrop.
+  local origin = pick_origin(term_buf)
+  local placeholder
+  if not origin then
+    -- Nothing usable, e.g. zen from a lone CLI window. Invent a real window:
+    -- the code view needs somewhere to sync back to, and sidekick's hide()
+    -- needs one too, because nvim refuses to close the last non-floating
+    -- window and would otherwise strand the old CLI split on the same buffer.
+    vim.cmd("silent! botright new")
+    origin = vim.api.nvim_get_current_win()
+    placeholder = vim.api.nvim_win_get_buf(origin)
+    vim.bo[placeholder].buflisted = false
   end
 
   define_bg()
   local g = geo()
 
-  -- Code view: a live float on the origin's buffer, view carried over.
-  local view = vim.api.nvim_win_call(origin, function()
-    return vim.fn.winsaveview()
-  end)
   local cfg = float_cfg(g, entry == "code")
   cfg.style = "minimal"
-  local code_win = vim.api.nvim_open_win(vim.api.nvim_win_get_buf(origin), false, cfg)
+  local code_buf = vim.api.nvim_win_get_buf(origin)
+  local view = vim.api.nvim_win_call(origin, vim.fn.winsaveview)
+  local code_win_id = vim.api.nvim_open_win(code_buf, false, cfg)
   -- Snacks pickers exclude floats when resolving their "main" window and
   -- would open files in the hidden origin split; this marker whitelists the
   -- zen float (same trick as Snacks.zen itself).
-  vim.w[code_win].snacks_main = true
-  vim.wo[code_win].winhighlight =
+  vim.w[code_win_id].snacks_main = true
+  vim.wo[code_win_id].winhighlight =
     "NormalFloat:SidekickZenBg,FloatBorder:SidekickZenBg,EndOfBuffer:SidekickZenBg,SignColumn:SidekickZenBg"
-  vim.api.nvim_win_call(code_win, function()
+  vim.api.nvim_win_call(code_win_id, function()
     vim.fn.winrestview(view)
   end)
 
   ws = {
     view = entry,
     origin = origin,
-    code_win = code_win,
+    placeholder = placeholder,
+    code_win = code_win_id,
     backdrop = open_backdrop(),
     term = term,
-    last_buf = vim.api.nvim_win_get_buf(origin),
-    watchers = { watch(code_win) },
+    last_buf = code_buf,
   }
+  watch(code_win_id)
 
-  -- A fresh float has no per-buffer view memory, so a file opened here lands
-  -- on its remembered cursor line at an arbitrary window row (often showing
-  -- the file's tail). Center once the position settles; the schedule lets
-  -- last-position autocmds (BufReadPost) move the cursor first.
-  table.insert(
-    ws.watchers,
-    vim.api.nvim_create_autocmd("BufWinEnter", {
-      group = group,
-      callback = function(ev)
-        if not ws or not vim.api.nvim_win_is_valid(ws.code_win) then
-          return
-        end
-        if vim.api.nvim_get_current_win() ~= ws.code_win or ev.buf == ws.last_buf then
+  vim.api.nvim_create_autocmd("BufWinEnter", {
+    group = ws_group,
+    callback = function(ev)
+      local cw = code_win()
+      if not cw then
+        return
+      end
+      local cur = vim.api.nvim_get_current_win()
+      if cur == cw then
+        -- Center once the position settles; the schedule lets last-position
+        -- autocmds (BufReadPost) move the cursor first.
+        if ev.buf == ws.last_buf then
           return
         end
         ws.last_buf = ev.buf
         vim.schedule(function()
-          if ws and vim.api.nvim_win_is_valid(ws.code_win) and vim.api.nvim_win_get_buf(ws.code_win) == ev.buf then
-            vim.api.nvim_win_call(ws.code_win, function()
-              vim.cmd("normal! zvzz")
-            end)
+          local w = code_win()
+          if w and vim.api.nvim_win_get_buf(w) == ev.buf then
+            center(w)
           end
         end)
-      end,
-    })
-  )
-
-  -- Fallback for openers that still target a "real" window: if a buffer
-  -- lands in the hidden origin window, adopt it into the code view and pull
-  -- focus back above the backdrop.
-  table.insert(
-    ws.watchers,
-    vim.api.nvim_create_autocmd("BufWinEnter", {
-      group = group,
-      callback = function(ev)
-        if not ws or vim.api.nvim_get_current_win() ~= ws.origin then
-          return
-        end
-        if not vim.api.nvim_win_is_valid(ws.code_win) then
-          return
-        end
-        -- The opener placed the cursor in the origin window; carry it over,
-        -- since set_buf would otherwise clamp the float's stale cursor.
-        local cur = vim.api.nvim_win_get_cursor(ws.origin)
-        vim.api.nvim_win_set_buf(ws.code_win, ev.buf)
+      elseif ws.origin and cur == ws.origin then
+        -- Fallback for openers that still target a "real" window: adopt the
+        -- buffer into the code view and pull focus back above the backdrop.
+        -- The opener placed the cursor in the origin window, so carry it
+        -- over; set_buf would otherwise clamp the float's stale cursor.
+        local cursor = vim.api.nvim_win_get_cursor(ws.origin)
+        vim.api.nvim_win_set_buf(cw, ev.buf)
         ws.last_buf = ev.buf
-        pcall(vim.api.nvim_win_set_cursor, ws.code_win, cur)
-        vim.api.nvim_win_call(ws.code_win, function()
-          vim.cmd("normal! zvzz")
-        end)
+        pcall(vim.api.nvim_win_set_cursor, cw, cursor)
+        center(cw)
         if ws.view ~= "code" then
           switch("code")
         else
-          vim.api.nvim_set_current_win(ws.code_win)
+          vim.api.nvim_set_current_win(cw)
         end
-      end,
-    })
-  )
+      end
+    end,
+  })
 
-  -- CLI view: re-open the sidekick terminal as a zen float. The blank title
-  -- overrides sidekick's default " Sidekick " (nvim rejects a title without
-  -- a border, so it can't simply be dropped).
+  -- CLI view: re-open the sidekick terminal as a zen float.
   if term then
     ws.term_was_open = term:is_open()
     ws.saved = { layout = term.opts.layout, float = vim.deepcopy(term.opts.float) }
     term.opts.layout = "float"
-    term.opts.float = vim.tbl_extend("force", float_cfg(g, entry == "cli"), { title = " " })
+    term.opts.float = cli_float_cfg(g, entry == "cli")
     term:hide()
     term:show()
+    -- The PTY follows the smallest window showing this buffer, so the zen
+    -- float has to be the only one. sidekick's hide() leaves its split behind
+    -- when it was the last non-floating window.
+    for _, w in ipairs(vim.fn.win_findbuf(term.buf)) do
+      if w ~= term.win then
+        pcall(vim.api.nvim_win_close, w, true)
+      end
+    end
     if term:win_valid() then
       vim.wo[term.win].winhighlight = vim.wo[term.win].winhighlight .. ",FloatBorder:SidekickZenBg"
-      table.insert(ws.watchers, watch(term.win))
+      watch(term.win)
     end
   end
 
-  -- Sidekick's own actions (send {this}/{file}/{selection}, prompt, focus)
-  -- show+focus the terminal window directly. During zen that window is the
-  -- hidden CLI float, so focusing it would land below the backdrop; raise
-  -- the CLI view instead, as if the user pressed keys.cli.
-  table.insert(
-    ws.watchers,
-    vim.api.nvim_create_autocmd("WinEnter", {
-      group = group,
-      callback = function()
-        if not ws or ws.view == "cli" then
-          return
-        end
-        if vim.api.nvim_get_current_win() == cli_win() then
-          switch("cli")
-        end
-      end,
-    })
-  )
+  -- Sidekick's own actions (send {this}/{file}/{selection}, prompt, focus,
+  -- blur) show and focus its windows directly. During zen the focused window
+  -- can be the float hidden below the backdrop, so follow focus with the view
+  -- rather than leaving the cursor somewhere invisible.
+  vim.api.nvim_create_autocmd("WinEnter", {
+    group = ws_group,
+    callback = function()
+      if not ws then
+        return
+      end
+      local cur = vim.api.nvim_get_current_win()
+      if cur == cli_win() then
+        switch("cli")
+      elseif cur == code_win() then
+        switch("code")
+      end
+    end,
+  })
 
   -- Switch keys swap views instead of walking (hidden) splits.
-  for _, mode in ipairs({ "n", "t" }) do
-    push_map(mode, M.config.keys.code, function()
-      switch("code")
-    end, { desc = "Zen: code view" })
-    push_map(mode, M.config.keys.cli, function()
-      switch("cli")
-    end, { desc = "Zen: CLI view" })
-  end
+  map_views(nil)
   if M.config.keys.exit then
     push_map("n", M.config.keys.exit, function()
       M.exit()
@@ -393,20 +474,13 @@ local function enter()
     -- Sidekick's own buffer-local t-mode nav maps (<c-h>/<c-l> by default)
     -- shadow the global zen overrides and no-op in float layouts, sending
     -- the key into the TUI. Shadow them right back on the terminal buffer.
-    for _, mode in ipairs({ "n", "t" }) do
-      push_map(mode, M.config.keys.code, function()
-        switch("code")
-      end, { buffer = term.buf, desc = "Zen: code view" })
-      push_map(mode, M.config.keys.cli, function()
-        switch("cli")
-      end, { buffer = term.buf, desc = "Zen: CLI view" })
-    end
+    map_views(term.buf)
   end
 
   if entry == "cli" then
     term:focus()
   else
-    vim.api.nvim_set_current_win(code_win)
+    vim.api.nvim_set_current_win(code_win_id)
   end
 end
 
@@ -416,30 +490,23 @@ function M.exit()
   end
   local s = ws
   ws = nil
-  for _, id in ipairs(s.watchers) do
-    pcall(vim.api.nvim_del_autocmd, id)
-  end
+  vim.api.nvim_clear_autocmds({ group = ws_group })
   pop_maps()
 
-  -- Whatever was reached inside the code view becomes the origin's state.
+  -- Capture whatever the code view reached before tearing it down.
+  local buf, view
   if vim.api.nvim_win_is_valid(s.code_win) then
-    local buf = vim.api.nvim_win_get_buf(s.code_win)
-    local view = vim.api.nvim_win_call(s.code_win, function()
-      return vim.fn.winsaveview()
-    end)
+    buf = vim.api.nvim_win_get_buf(s.code_win)
+    view = vim.api.nvim_win_call(s.code_win, vim.fn.winsaveview)
     pcall(vim.api.nvim_win_close, s.code_win, true)
-    if vim.api.nvim_win_is_valid(s.origin) then
-      vim.api.nvim_win_set_buf(s.origin, buf)
-      vim.api.nvim_win_call(s.origin, function()
-        vim.fn.winrestview(view)
-      end)
-    end
   end
   if vim.api.nvim_win_is_valid(s.backdrop) then
     pcall(vim.api.nvim_win_close, s.backdrop, true)
   end
 
-  if s.term and s.saved then
+  -- Restore the terminal before touching the origin, so a window always
+  -- remains and closes below can't hit "last window".
+  if s.saved then
     s.term.opts.layout = s.saved.layout
     s.term.opts.float = s.saved.float
     if s.term:win_valid() then
@@ -450,8 +517,20 @@ function M.exit()
     end
   end
 
-  if vim.api.nvim_win_is_valid(s.origin) then
-    vim.api.nvim_set_current_win(s.origin)
+  local origin = s.origin and vim.api.nvim_win_is_valid(s.origin) and s.origin or nil
+  if origin and s.placeholder and buf == s.placeholder then
+    -- zen never opened anything, so drop the window it invented.
+    pcall(vim.api.nvim_win_close, origin, true)
+    origin = vim.api.nvim_win_is_valid(origin) and origin or nil
+  elseif origin and buf then
+    -- Whatever was reached inside the code view becomes the origin's state.
+    vim.api.nvim_win_set_buf(origin, buf)
+    vim.api.nvim_win_call(origin, function()
+      vim.fn.winrestview(view)
+    end)
+  end
+  if origin then
+    vim.api.nvim_set_current_win(origin)
   end
 end
 
@@ -482,23 +561,10 @@ function M.setup(opts)
       if not ws then
         return
       end
-      local g = geo()
       if vim.api.nvim_win_is_valid(ws.backdrop) then
-        vim.api.nvim_win_set_config(ws.backdrop, {
-          relative = "editor",
-          row = 0,
-          col = 0,
-          width = vim.o.columns,
-          height = math.max(editor_height(), 1),
-        })
+        vim.api.nvim_win_set_config(ws.backdrop, backdrop_cfg())
       end
-      if vim.api.nvim_win_is_valid(ws.code_win) then
-        vim.api.nvim_win_set_config(ws.code_win, float_cfg(g, ws.view == "code"))
-      end
-      local cwin = cli_win()
-      if cwin then
-        vim.api.nvim_win_set_config(cwin, float_cfg(g, ws.view == "cli"))
-      end
+      place()
     end,
   })
 end

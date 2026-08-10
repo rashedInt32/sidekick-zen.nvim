@@ -22,6 +22,7 @@ Needs Neovim 0.10+ and sidekick.nvim (works without it too, you just get code-on
 {
   "rashedInt32/sidekick-zen.nvim",
   dependencies = { "folke/sidekick.nvim" },
+  cmd = "SidekickZen",
   keys = {
     {
       "<leader>z",

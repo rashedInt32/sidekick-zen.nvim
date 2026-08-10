@@ -42,7 +42,8 @@ Needs Neovim 0.10+ and sidekick.nvim (works without it too, you just get code-on
 | your toggle | anywhere | enter / exit zen |
 | `<C-h>` | zen, normal + terminal mode | show code |
 | `<C-l>` | zen, normal + terminal mode | show the CLI |
-| `q` / `<c-.>` | zen, CLI view | switch to code instead of hiding |
+| `q` | zen, normal mode | exit zen |
+| `<c-.>` | zen, CLI view | switch to code instead of hiding |
 
 Enter from code and you see code first. Enter from the sidekick window and you land on the CLI, cursor in its input box. `:SidekickZen` toggles too.
 
@@ -56,6 +57,9 @@ require("sidekick-zen").setup({
   keys = {
     code = "<C-h>",
     cli = "<C-l>",
+    -- q exits from normal mode in either view. It shadows macro recording
+    -- while zen is active, so set it to false if you record macros there.
+    exit = "q",
   },
   -- q and <c-.> switch to code during zen instead of hiding the CLI.
   -- Set false if you rebound sidekick's hide keys.

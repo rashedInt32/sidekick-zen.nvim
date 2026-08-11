@@ -34,22 +34,29 @@ for name in alpha beta; do
   awk -v n="$name" 'BEGIN { for (i = 1; i <= 300; i++) print n " line " i }' > "$FIXTURES/$name.txt"
 done
 
-# Pre-clone dependencies before the timed run so the first spec isn't racing a
-# network fetch.
-nvim --headless -u "$ROOT/tests/minimal_init.lua" -c "qa!" >/dev/null 2>&1
+# Clone dependencies up front so the run itself isn't racing a network fetch.
+nvim --headless -u "$ROOT/tests/minimal_init.lua" -c "qa!" >/dev/null 2>&1 \
+  || { echo "could not bootstrap tests/.deps" >&2; exit 2; }
 
 tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" \
   "cd $FIXTURES && ZEN_FIXTURES=$FIXTURES nvim --listen $SOCK -u $ROOT/tests/minimal_init.lua alpha.txt"
 
-for _ in $(seq 1 60); do
-  [ -S "$SOCK" ] && nvim --server "$SOCK" --remote-expr "1" >/dev/null 2>&1 && break
-  sleep 0.5
-done
-[ -S "$SOCK" ] || { echo "neovim did not start" >&2; exit 2; }
-
 rpc() { timeout 120 nvim --server "$SOCK" --remote-expr "$1" 2>&1; }
 run_lua() { rpc "luaeval('dofile(_A)', '$1')"; }
 resize() { tmux resize-window -t "$SESSION" -x "$1" -y "$2"; sleep 1.5; }
+
+# Wait for init to FINISH, not merely for the socket to answer: nvim services
+# RPC while sourcing, so an early spec can arrive before the plugin is on the
+# runtimepath.
+ready=""
+for _ in $(seq 1 120); do
+  if [ -S "$SOCK" ] && [ "$(rpc "get(g:, 'zen_test_ready', 0)")" = "1" ]; then
+    ready=1
+    break
+  fi
+  sleep 0.5
+done
+[ -n "$ready" ] || { echo "neovim did not become ready" >&2; exit 2; }
 
 run_lua "$ROOT/tests/helpers.lua" >/dev/null
 

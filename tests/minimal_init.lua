@@ -27,3 +27,8 @@ vim.o.scrolloff = 8 -- the setting that made the CLI input box drift
 
 require("sidekick").setup({ nes = { enabled = false } })
 require("sidekick-zen").setup({})
+
+-- The RPC server answers while this file is still being sourced, because
+-- vim.fn.system() pumps the event loop during the clone above. The runner
+-- waits on this flag rather than on the socket.
+vim.g.zen_test_ready = 1

@@ -83,14 +83,18 @@ local function geo()
   local avail = editor_height()
   local width = M.config.width <= 1 and math.floor(vim.o.columns * M.config.width) or M.config.width
   width = math.min(math.max(width, MIN.width), vim.o.columns)
-  local height = math.min(math.max(avail - 2, MIN.height), avail) -- minus two solid border rows
+  -- Minus two solid border rows, minus one more so a row of bare backdrop
+  -- separates the float from the statusline.
+  local height = math.min(math.max(avail - 3, MIN.height), avail)
   return {
     width = width,
     height = height,
     -- Sidekick reads row/col <= 1 as a fraction of the screen, so keep both
-    -- above that and centre by hand.
-    row = math.max(math.floor((avail - height) / 2), 0),
-    col = math.max(math.floor((vim.o.columns - width) / 2), 0),
+    -- above that and centre by hand. Centre the BORDERED extent (+2 each
+    -- axis): centring the text area alone pushed the float down a row, and
+    -- its bottom border row painted over the statusline.
+    row = math.max(math.floor((avail - height - 2) / 2), 0),
+    col = math.max(math.floor((vim.o.columns - width - 2) / 2), 0),
   }
 end
 

@@ -39,8 +39,8 @@ H.check(
   "row=" .. tostring(bd.row) .. " col=" .. tostring(bd.col)
 )
 H.check(
-  "floats fit on screen",
-  want.row + want.height + 2 <= want.avail + 1 and want.col + want.width <= vim.o.columns,
+  "floats fit on screen (bordered extent stays off the statusline row)",
+  want.row + want.height + 2 <= want.avail and want.col + want.width <= vim.o.columns,
   "row+h=" .. (want.row + want.height) .. " avail=" .. want.avail
 )
 

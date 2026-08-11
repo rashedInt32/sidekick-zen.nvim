@@ -66,12 +66,12 @@ function H.expect_geo()
   local avail = math.max(vim.o.lines - vim.o.cmdheight - (vim.o.laststatus > 0 and 1 or 0), 1)
   local width = Z.config.width <= 1 and math.floor(vim.o.columns * Z.config.width) or Z.config.width
   width = math.min(math.max(width, 80), vim.o.columns)
-  local height = math.min(math.max(avail - 2, 10), avail)
+  local height = math.min(math.max(avail - 3, 10), avail)
   return {
     width = width,
     height = height,
-    row = math.max(math.floor((avail - height) / 2), 0),
-    col = math.max(math.floor((vim.o.columns - width) / 2), 0),
+    row = math.max(math.floor((avail - height - 2) / 2), 0),
+    col = math.max(math.floor((vim.o.columns - width - 2) / 2), 0),
     avail = avail,
   }
 end

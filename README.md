@@ -8,11 +8,11 @@ https://github.com/user-attachments/assets/d3b49d0d-c8cb-4ed0-8b4d-e44eb7f6fc1c
 
 ## Why another zen plugin?
 
-Because the usual ones break terminals. Neovim sizes a terminal to the *smallest* window showing it, so wrapping your AI CLI in zen-mode.nvim or Snacks.zen leaves the TUI rendering at its old split width inside a big empty float.
+Because the usual ones break terminals. Neovim sizes a terminal's PTY to the *largest* window showing its buffer. Wrap your AI CLI in a zen plugin that opens a second view and the TUI renders at the wrong width and clips, inside an otherwise empty float.
 
-sidekick-zen never shows the terminal twice. It re-opens the sidekick terminal itself as a zen float, and switching views just raises one float above the backdrop and lowers the other beneath it. Nothing resizes, so the TUI never reflows or flickers.
+sidekick-zen never shows the terminal twice. It re-opens the sidekick terminal itself as a zen float, and switching views only raises one float above the backdrop and drops the other below it. Nothing resizes, so the TUI never reflows or flickers. The test suite asks the CLI process directly what size its terminal is, rather than trusting window widths.
 
-A few things it gets right along the way: the code view is a real window, so pickers and file browsers work inside it and everything syncs back when you leave. The switch keys only exist while zen is active, and whatever they shadowed comes back on exit. And if the CLI dies or something closes a window behind its back, the whole thing tears down cleanly.
+The scope is deliberately small: zen owns its own three floats and nothing else. It does not restructure your windows or write into them uninvited. Anything it cannot represent, such as a new split or another tabpage, closes the workspace rather than swallowing it.
 
 ## Install
 
@@ -73,7 +73,13 @@ require("sidekick-zen").setup({
 })
 ```
 
-Two things worth knowing. Zen closes when you leave its tabpage, since the floats live in one tab and controlling an invisible workspace from another is worse than reopening. And it never mirrors a sidebar, quickfix, or help window, because exiting writes the code view's buffer back into the window it mirrored. Toggle from one of those and you get the nearest real file window, or an empty canvas if there isn't one.
+### Behaviour worth knowing
+
+Zen steps aside rather than hiding things from you. It closes itself when you leave its tabpage, and when anything opens a new ordinary window, because that window would sit under the backdrop where you could never reach it. Reopening is one keystroke.
+
+It prefers a real file to mirror. Toggle from a sidebar or quickfix window and you get the nearest file window instead, or an empty scratch canvas if there is none. That canvas is discarded on exit unless you typed in it, in which case it is kept and listed.
+
+Navigating inside zen carries back to the window you came from, but only while that window is still an ordinary file window showing what it showed when zen opened. Anything else is yours, and zen leaves it alone.
 
 > [!NOTE]
 > The CLI view leans on sidekick internals, tested against sidekick.nvim `208e1c5`. If an update breaks something, open an issue.
@@ -85,9 +91,9 @@ tests/run.sh            # everything
 tests/run.sh lone_cli   # one spec
 ```
 
-The suite runs neovim inside tmux and drives it over RPC, because a real terminal is the only place the PTY sizing above actually happens. It uses a fake CLI tool, so nothing hits the network. sidekick.nvim is cloned into `tests/.deps` on first run; set `SIDEKICK_REF` to test against a specific revision.
+The suite runs neovim inside tmux and drives it over RPC, because a real terminal is the only place the PTY sizing above actually happens. The fake CLI it drives reports its own `stty size`, so the specs assert what the process believes rather than what the window claims. Nothing hits the network. sidekick.nvim is cloned into `tests/.deps` on first run; set `SIDEKICK_REF` to test against a specific revision.
 
-Every spec guards a bug that was once real, so please add one alongside a fix.
+Every spec guards a bug that was once real, so please add one alongside a fix. The suite is itself checked by mutation: deliberately reintroducing each historic bug must turn it red. An earlier version passed 18/18 with nine live defects, which is the failure mode this guards against.
 
 ## Credits
 

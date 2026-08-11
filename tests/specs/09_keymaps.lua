@@ -43,11 +43,17 @@ end)
 vim.wait(600)
 H.no_workspace_left()
 
+-- nvim normalises key notation when it reports a mapping back (<C-w> vs
+-- <C-W>), so compare the resolved terminal codes rather than the spelling.
+local function rhs_of(m)
+  local r = m.rhs or m.desc or ""
+  return vim.api.nvim_replace_termcodes(r, true, true, true)
+end
 for _, k in ipairs({ Z.config.keys.code, Z.config.keys.cli, Z.config.keys.exit }) do
   local now = vim.fn.maparg(k, "n", false, true)
   H.check(
     "global " .. k .. " restored",
-    (now.rhs or now.desc or "") == (before[k].rhs or before[k].desc or ""),
+    rhs_of(now) == rhs_of(before[k]),
     "was=" .. tostring(before[k].rhs or before[k].desc) .. " now=" .. tostring(now.rhs or now.desc)
   )
 end

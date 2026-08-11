@@ -29,8 +29,65 @@ end
 -- A fake CLI tool: a long-lived line-reader. No network, no auth, and it
 -- behaves like a TUI as far as the PTY is concerned.
 function H.register_tool()
+  -- Echoes its own terminal size whenever it receives a line, which lets the
+  -- suite assert the real PTY geometry rather than the window's.
   require("sidekick.config").cli.tools.zentest = {
-    cmd = { "sh", "-c", "printf 'ZENTEST READY\\n'; while true; do read -r x || sleep 1; done" },
+    cmd = { "sh", "-c", "printf 'ZENTEST READY\\n'; while read -r x; do stty size; done" },
+  }
+end
+
+-- Ask the CLI process how big its terminal actually is. This is the invariant
+-- the whole plugin exists to protect, and window widths are only a proxy.
+---@return integer? rows, integer? cols
+function H.pty_size()
+  local t = H.term()
+  if not t or not t:is_running() then
+    return nil, nil
+  end
+  local before = #vim.api.nvim_buf_get_lines(t.buf, 0, -1, false)
+  vim.fn.chansend(t.job, "\n")
+  vim.wait(1200, function()
+    return #vim.api.nvim_buf_get_lines(t.buf, 0, -1, false) > before
+  end)
+  vim.wait(150)
+  local lines = vim.api.nvim_buf_get_lines(t.buf, 0, -1, false)
+  for i = #lines, 1, -1 do
+    local r, c = lines[i]:match("^%s*(%d+)%s+(%d+)%s*$")
+    if r then
+      return tonumber(r), tonumber(c)
+    end
+  end
+  return nil, nil
+end
+
+-- What geo() should produce, recomputed independently of the plugin.
+function H.expect_geo()
+  local Z = H.zen()
+  local avail = math.max(vim.o.lines - vim.o.cmdheight - (vim.o.laststatus > 0 and 1 or 0), 1)
+  local width = Z.config.width <= 1 and math.floor(vim.o.columns * Z.config.width) or Z.config.width
+  width = math.min(math.max(width, 80), vim.o.columns)
+  local height = math.min(math.max(avail - 2, 10), avail)
+  return {
+    width = width,
+    height = height,
+    row = math.max(math.floor((avail - height) / 2), 0),
+    col = math.max(math.floor((vim.o.columns - width) / 2), 0),
+    avail = avail,
+  }
+end
+
+-- Full geometry of a float, so specs can assert position as well as size.
+function H.win_geo(win)
+  local c = vim.api.nvim_win_get_config(win)
+  return { width = c.width, height = c.height, row = c.row, col = c.col, zindex = c.zindex }
+end
+
+function H.counts()
+  return {
+    wins = #vim.api.nvim_list_wins(),
+    bufs = #vim.api.nvim_list_bufs(),
+    autocmds = H.ws_autocmds(),
+    maps = #vim.api.nvim_get_keymap("n") + #vim.api.nvim_get_keymap("t"),
   }
 end
 
@@ -77,7 +134,8 @@ function H.term_win()
 end
 
 -- Every window currently showing the terminal buffer. The PTY follows the
--- smallest of these, so the suite asserts there is exactly one.
+-- LARGEST of these, so a second, wider view makes the TUI render past the
+-- edge of its float. The suite asserts there is exactly one.
 function H.term_wins()
   local t = H.term()
   if not t or not t:buf_valid() then

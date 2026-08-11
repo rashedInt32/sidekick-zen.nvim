@@ -5,6 +5,12 @@ H.reset()
 local Z = H.zen()
 
 H.check("workspace survived the resize", H.code_win() ~= nil)
+if not H.code_win() then
+  -- 07_narrow leaves the workspace open for this spec, driven by the tmux
+  -- resizes in run.sh. Standalone there is nothing to measure.
+  H.check("this spec needs 07_narrow to run first (use the full suite)", false)
+  return H.report()
+end
 H.check("editor is wide again", vim.o.columns >= 150, "columns=" .. vim.o.columns)
 
 local want = math.min(math.max(math.floor(vim.o.columns * Z.config.width), 80), vim.o.columns)

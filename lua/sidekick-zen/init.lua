@@ -400,11 +400,20 @@ local function enter()
         ws.last_buf = ev.buf
         pcall(vim.api.nvim_win_set_cursor, cw, cursor)
         center(cw)
-        if ws.view ~= "code" then
-          switch("code")
-        else
-          vim.api.nvim_set_current_win(cw)
-        end
+        -- Focus has to move after the opening command finishes; changing the
+        -- current window from inside BufWinEnter gets undone, which would
+        -- leave the cursor typing into the window below the backdrop.
+        vim.schedule(function()
+          local w = code_win()
+          if not w then
+            return
+          end
+          if ws.view ~= "code" then
+            switch("code")
+          else
+            vim.api.nvim_set_current_win(w)
+          end
+        end)
       end
     end,
   })

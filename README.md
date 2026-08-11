@@ -79,6 +79,17 @@ vim.api.nvim_set_hl(0, "SidekickZenBg", { bg = "#0d1522" })
 > [!NOTE]
 > The CLI view leans on sidekick internals, tested against sidekick.nvim `208e1c5`. If an update breaks something, open an issue.
 
+## Tests
+
+```bash
+tests/run.sh            # everything
+tests/run.sh lone_cli   # one spec
+```
+
+The suite runs neovim inside tmux and drives it over RPC, because a real terminal is the only place the PTY sizing above actually happens. It uses a fake CLI tool, so nothing hits the network. sidekick.nvim is cloned into `tests/.deps` on first run; set `SIDEKICK_REF` to test against a specific revision.
+
+Every spec guards a bug that was once real, so please add one alongside a fix.
+
 ## Credits
 
 [folke/sidekick.nvim](https://github.com/folke/sidekick.nvim) for the sidekick, [folke/zen-mode.nvim](https://github.com/folke/zen-mode.nvim) for the look.

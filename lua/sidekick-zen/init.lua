@@ -36,6 +36,9 @@ M.config = {
   -- "switch to code view" while zen is active, so they don't tear the
   -- workspace down. Set to false if you rebound sidekick's hide keys.
   hijack_hide_keys = true,
+  -- Backdrop colour. Defaults to the CLI's own background, falling back to
+  -- Normal. Accepts anything nvim_set_hl takes for `bg`, e.g. "#0d1522".
+  backdrop_bg = nil,
 }
 
 local Z = { top = 50, backdrop = 40, hidden = 30 }
@@ -52,6 +55,7 @@ local DENY_BUFTYPE = { nofile = true, quickfix = true, help = true, prompt = tru
 
 ---@class sidekick.zen.Workspace
 ---@field view "code"|"cli"
+---@field tab integer tabpage the floats live in
 ---@field origin? integer window the code view mirrors (nil if none was usable)
 ---@field placeholder? integer scratch buffer of an origin window zen invented
 ---@field code_win integer
@@ -115,13 +119,18 @@ local function backdrop_cfg()
   }
 end
 
+-- Recomputed on every enter, and again if the colorscheme changes mid-session.
+-- An earlier version tried to detect a user-defined group and skip, but
+-- nvim_get_hl reports no `default` field, so the check never fired and zen's
+-- first definition stuck forever. `config.backdrop_bg` is the override now.
 local function define_bg()
-  if vim.fn.hlexists("SidekickZenBg") == 1 and not vim.api.nvim_get_hl(0, { name = "SidekickZenBg" }).default then
-    return -- user or colorscheme defined it explicitly
+  local bg = M.config.backdrop_bg
+  if not bg then
+    local chat = vim.api.nvim_get_hl(0, { name = "SidekickChat", link = false })
+    local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+    bg = chat.bg or normal.bg
   end
-  local chat = vim.api.nvim_get_hl(0, { name = "SidekickChat", link = false })
-  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
-  vim.api.nvim_set_hl(0, "SidekickZenBg", { bg = chat.bg or normal.bg, default = true })
+  vim.api.nvim_set_hl(0, "SidekickZenBg", { bg = bg })
 end
 
 local function open_backdrop()
@@ -258,16 +267,53 @@ local function switch(view)
   end
 end
 
+-- Put the cursor back on whatever is currently on top. Every zen window is a
+-- float, so any normal window the cursor reaches sits under the backdrop and
+-- would be typed into blind.
+local function focus_active()
+  if not ws then
+    return
+  end
+  if ws.view == "cli" then
+    if cli_ready() then
+      ws.term:focus()
+    else
+      switch("code") -- the CLI died out from under us; recover onto the code view
+    end
+    return
+  end
+  local cw = code_win()
+  if cw then
+    vim.api.nvim_set_current_win(cw)
+  end
+end
+
+-- What the switch keys call. Unlike switch(), asking for the view you are
+-- already on re-asserts focus, so the keys can rescue a stranded cursor.
+local function show_view(view)
+  if not ws then
+    return
+  end
+  if ws.view == view then
+    focus_active()
+  else
+    switch(view)
+  end
+end
+
 local function watch(win)
+  local mine = ws
   vim.api.nvim_create_autocmd("WinClosed", {
     group = ws_group,
     pattern = tostring(win),
     once = true,
     callback = function()
       -- A zen window closed behind our back (:q, process exit, plugin
-      -- keymaps): tear the whole workspace down to stay consistent.
+      -- keymaps): tear the whole workspace down to stay consistent. Compare
+      -- identity, or a queued callback can tear down a workspace opened
+      -- after this one in the same tick.
       vim.schedule(function()
-        if ws then
+        if ws and ws == mine then
           M.exit()
         end
       end)
@@ -275,11 +321,14 @@ local function watch(win)
   })
 end
 
--- A window the code view can safely mirror: real, not floating, and not the
--- CLI terminal itself (cloning that buffer would show the PTY in a second
--- window and shrink it). `strict` also rejects sidebars and friends, applied
--- only when we're guessing rather than following an explicit focus.
-local function usable_origin(win, term_buf, strict)
+-- A window the code view can safely mirror: real, not floating, not the CLI
+-- terminal (cloning that buffer would show the PTY in a second window and
+-- shrink it), and not a sidebar, quickfix or help window. Exit writes the
+-- code view's buffer back into this window, which destroys anything whose
+-- content is not a file. That applies to the focused window too: an earlier
+-- version exempted it on the grounds that the user had chosen it, and that
+-- ate quickfix and oil windows.
+local function usable_origin(win, term_buf)
   if not win or win == 0 or not vim.api.nvim_win_is_valid(win) then
     return false
   end
@@ -287,21 +336,17 @@ local function usable_origin(win, term_buf, strict)
     return false
   end
   local buf = vim.api.nvim_win_get_buf(win)
-  if buf == term_buf or vim.bo[buf].buftype == "terminal" then
+  if buf == term_buf then
     return false
   end
-  return not strict or not DENY_BUFTYPE[vim.bo[buf].buftype]
+  return not DENY_BUFTYPE[vim.bo[buf].buftype]
 end
 
 local function pick_origin(term_buf)
-  local cur = vim.api.nvim_get_current_win()
-  if usable_origin(cur, term_buf, false) then
-    return cur
-  end
-  local candidates = { vim.fn.win_getid(vim.fn.winnr("#")) }
+  local candidates = { vim.api.nvim_get_current_win(), vim.fn.win_getid(vim.fn.winnr("#")) }
   vim.list_extend(candidates, vim.api.nvim_tabpage_list_wins(0))
   for _, win in ipairs(candidates) do
-    if usable_origin(win, term_buf, true) then
+    if usable_origin(win, term_buf) then
       return win
     end
   end
@@ -311,10 +356,10 @@ end
 local function map_views(buf)
   for _, mode in ipairs({ "n", "t" }) do
     push_map(mode, M.config.keys.code, function()
-      switch("code")
+      show_view("code")
     end, { buffer = buf, desc = "Zen: code view" })
     push_map(mode, M.config.keys.cli, function()
-      switch("cli")
+      show_view("cli")
     end, { buffer = buf, desc = "Zen: CLI view" })
   end
 end
@@ -338,6 +383,7 @@ local function enter()
     origin = vim.api.nvim_get_current_win()
     placeholder = vim.api.nvim_win_get_buf(origin)
     vim.bo[placeholder].buflisted = false
+    vim.bo[placeholder].bufhidden = "wipe"
   end
 
   define_bg()
@@ -360,6 +406,7 @@ local function enter()
 
   ws = {
     view = entry,
+    tab = vim.api.nvim_get_current_tabpage(),
     origin = origin,
     placeholder = placeholder,
     code_win = code_win_id,
@@ -428,9 +475,11 @@ local function enter()
     term:show()
     -- The PTY follows the smallest window showing this buffer, so the zen
     -- float has to be the only one. sidekick's hide() leaves its split behind
-    -- when it was the last non-floating window.
-    for _, w in ipairs(vim.fn.win_findbuf(term.buf)) do
-      if w ~= term.win then
+    -- when it was the last non-floating window. Only this tabpage: closing a
+    -- window elsewhere can be the last one in its tabpage and take the whole
+    -- tabpage with it, which nothing restores.
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if w ~= term.win and vim.api.nvim_win_get_buf(w) == term.buf then
         pcall(vim.api.nvim_win_close, w, true)
       end
     end
@@ -447,7 +496,7 @@ local function enter()
   vim.api.nvim_create_autocmd("WinEnter", {
     group = ws_group,
     callback = function()
-      if not ws then
+      if not ws or vim.api.nvim_get_current_tabpage() ~= ws.tab then
         return
       end
       local cur = vim.api.nvim_get_current_win()
@@ -455,6 +504,21 @@ local function enter()
         switch("cli")
       elseif cur == code_win() then
         switch("code")
+      elseif vim.api.nvim_win_get_config(cur).relative == "" then
+        -- A normal window, so it is underneath the backdrop: <c-w>w and
+        -- friends land here and the cursor would be invisible. Bounce back.
+        focus_active()
+      end
+    end,
+  })
+
+  -- The floats belong to this tabpage. Rather than leave global keys driving
+  -- an invisible workspace from another tab, close it on the way out.
+  vim.api.nvim_create_autocmd("TabLeave", {
+    group = ws_group,
+    callback = function()
+      if ws and vim.api.nvim_get_current_tabpage() == ws.tab then
+        vim.schedule(M.exit)
       end
     end,
   })
@@ -520,17 +584,27 @@ function M.exit()
     s.term.opts.float = s.saved.float
     if s.term:win_valid() then
       s.term:hide()
-      if s.term_was_open then
+      -- Only re-show a live session. sidekick's show() runs start(), which
+      -- jobstarts the tool again when the job is dead, so exiting zen would
+      -- silently spawn a second CLI process.
+      if s.term_was_open and s.term:is_running() then
         s.term:show()
       end
     end
   end
 
   local origin = s.origin and vim.api.nvim_win_is_valid(s.origin) and s.origin or nil
-  if origin and s.placeholder and buf == s.placeholder then
-    -- zen never opened anything, so drop the window it invented.
-    pcall(vim.api.nvim_win_close, origin, true)
-    origin = vim.api.nvim_win_is_valid(origin) and origin or nil
+  -- Nothing claimed the window zen invented, so drop it. `buf` is nil when the
+  -- code float was closed externally, which must still count as unclaimed.
+  local unclaimed = s.placeholder and (buf == nil or buf == s.placeholder)
+  if origin and unclaimed then
+    -- Unless it was typed into: closing would discard that text silently.
+    if vim.bo[s.placeholder].modified then
+      vim.bo[s.placeholder].bufhidden = ""
+    else
+      pcall(vim.api.nvim_win_close, origin, true)
+      origin = vim.api.nvim_win_is_valid(origin) and origin or nil
+    end
   elseif origin and buf then
     -- Whatever was reached inside the code view becomes the origin's state.
     vim.api.nvim_win_set_buf(origin, buf)

@@ -67,14 +67,13 @@ require("sidekick-zen").setup({
   -- q and <c-.> switch to code during zen instead of hiding the CLI.
   -- Set false if you rebound sidekick's hide keys.
   hijack_hide_keys = true,
+  -- Backdrop colour. Defaults to the CLI's own background, falling back
+  -- to Normal. It is recomputed on every toggle so it tracks your theme.
+  backdrop_bg = nil, -- e.g. "#0d1522"
 })
 ```
 
-The backdrop color comes from the `SidekickZenBg` highlight. Override it if you want a different shade:
-
-```lua
-vim.api.nvim_set_hl(0, "SidekickZenBg", { bg = "#0d1522" })
-```
+Two things worth knowing. Zen closes when you leave its tabpage, since the floats live in one tab and controlling an invisible workspace from another is worse than reopening. And it never mirrors a sidebar, quickfix, or help window, because exiting writes the code view's buffer back into the window it mirrored. Toggle from one of those and you get the nearest real file window, or an empty canvas if there isn't one.
 
 > [!NOTE]
 > The CLI view leans on sidekick internals, tested against sidekick.nvim `208e1c5`. If an update breaks something, open an issue.

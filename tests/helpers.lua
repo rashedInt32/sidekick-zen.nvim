@@ -34,7 +34,11 @@ function H.register_tool()
   -- the line itself through `cat -v`, so control bytes fed to the PTY (the
   -- <C-l> pass-through) show up as visible ^L text the suite can grep for.
   require("sidekick.config").cli.tools.zentest = {
-    cmd = { "sh", "-c", "printf 'ZENTEST READY\\n'; while read -r x; do stty size; printf 'GOT[%s]\\n' \"$x\" | cat -v; done" },
+    cmd = {
+      "sh",
+      "-c",
+      "printf 'ZENTEST READY\\n'; while read -r x; do stty size; printf 'GOT[%s]\\n' \"$x\" | cat -v; done",
+    },
   }
 end
 

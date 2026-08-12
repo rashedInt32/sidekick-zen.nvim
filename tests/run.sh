@@ -92,17 +92,24 @@ if [ -z "$FILTER" ]; then
   tmux send-keys -t "$SESSION" Escape; sleep 0.4
   tmux send-keys -t "$SESSION" C-l; sleep 1.5
   mode_cli="$(rpc 'mode(1)')"
+  # A second <C-l>, already typing in the CLI, must reach the TUI itself
+  # (Claude Code's repaint), not be swallowed by the switch mapping.
+  tmux send-keys -t "$SESSION" C-l; sleep 0.5
+  tmux send-keys -t "$SESSION" Enter; sleep 1.5
+  passthrough="$(rpc "luaeval('tostring(_G.H.tui_got_ctrl_l())')")"
+  mode_stay="$(rpc 'mode(1)')"
   tmux send-keys -t "$SESSION" C-h; sleep 1.5
   mode_code="$(rpc 'mode(1)')"
   on_code="$(rpc "luaeval('tostring(_G.H.cur() == _G.H.code_win())')")"
   tmux send-keys -t "$SESSION" q; sleep 1.5
   left="$(rpc "luaeval('#_G.H.zen_floats()')")"
-  if [ "$mode_cli" = "t" ] && [ "$mode_code" = "n" ] && [ "$on_code" = "true" ] && [ "$left" = "0" ]; then
+  if [ "$mode_cli" = "t" ] && [ "$passthrough" = "true" ] && [ "$mode_stay" = "t" ] \
+    && [ "$mode_code" = "n" ] && [ "$on_code" = "true" ] && [ "$left" = "0" ]; then
     echo "ok   real_keystrokes"
   else
     failed=$((failed + 1))
     echo "FAIL real_keystrokes"
-    echo "     <C-l> mode=$mode_cli (want t)   <C-h> mode=$mode_code (want n) on_code=$on_code   after q floats=$left (want 0)"
+    echo "     <C-l> mode=$mode_cli (want t)   2nd <C-l> passthrough=$passthrough (want true) mode=$mode_stay (want t)   <C-h> mode=$mode_code (want n) on_code=$on_code   after q floats=$left (want 0)"
   fi
 fi
 

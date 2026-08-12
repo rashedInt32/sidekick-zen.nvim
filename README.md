@@ -43,10 +43,13 @@ Needs Neovim 0.10+ and sidekick.nvim (works without it too, you just get code-on
 | your toggle | anywhere | enter / exit zen |
 | `<C-h>` | zen, normal + terminal mode | show code |
 | `<C-l>` | zen, normal + terminal mode | show the CLI |
+| `<C-l>` again | zen, typing in the CLI | passed through to the TUI |
 | `q` | zen, normal mode | exit zen |
 | `<c-.>` | zen, CLI view | switch to code instead of hiding |
 
 Enter from code and you see code first. Enter from the sidekick window and you land on the CLI, cursor in its input box. `:SidekickZen` toggles too.
+
+The pass-through matters for Claude Code: its input box sometimes drifts and leaves a ghost copy of itself behind, and `<C-l>` is its repaint command. Since the switch key only *switches* when you are elsewhere, pressing it once more inside the CLI hands the real `<C-l>` to Claude and cleans the screen up.
 
 Sidekick's own keymaps play along: sending `{this}`, `{file}`, or a selection, picking a prompt, or focusing the CLI all raise the CLI view automatically, so the context lands where you can see it.
 
@@ -59,6 +62,8 @@ require("sidekick-zen").setup({
   width = 0.8, -- fraction of the editor, or absolute columns if > 1
   keys = {
     code = "<C-h>",
+    -- Pressed again while typing in the CLI, this key goes to the TUI
+    -- itself (Claude Code repaints on <C-l>).
     cli = "<C-l>",
     -- q exits from normal mode in either view. It shadows macro recording
     -- while zen is active, so set it to false if you record macros there.

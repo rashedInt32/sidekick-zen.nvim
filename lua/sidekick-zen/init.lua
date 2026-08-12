@@ -28,7 +28,10 @@ M.config = {
   -- active. Whatever they shadowed is restored on exit.
   keys = {
     code = "<C-h>", -- show the code view
-    cli = "<C-l>", -- show the CLI view
+    -- Show the CLI view. Pressed again while typing in the CLI, the key is
+    -- passed through to the TUI, so <C-l> still reaches Claude Code's
+    -- repaint when its input box drifts.
+    cli = "<C-l>",
     -- Exit zen from normal mode in either view. Shadows macro recording
     -- while zen is active; set to false if you record macros in zen.
     exit = "q",
@@ -327,15 +330,27 @@ end
 
 -- What the switch keys call. Unlike switch(), asking for the view you are
 -- already on re-asserts focus, so the keys can rescue a stranded cursor.
+--
+-- One exception: the CLI key, pressed while already typing in the CLI, goes
+-- through to the TUI instead of being swallowed. <C-l> is Claude Code's
+-- repaint command and the one reliable fix for its shifted/ghosted input
+-- box, and the zen override used to eat it.
 local function show_view(view)
   if not ws then
     return
   end
-  if ws.view == view then
-    focus_active()
-  else
+  if ws.view ~= view then
     switch(view)
+    return
   end
+  if view == "cli" and cli_ready() and ws.term:is_focused() and vim.api.nvim_get_mode().mode == "t" then
+    local key = vim.api.nvim_replace_termcodes(M.config.keys.cli, true, true, true)
+    -- Unmapped keys fed in terminal mode land in the PTY, encoded the way a
+    -- real keypress would be.
+    vim.api.nvim_feedkeys(key, "n", false)
+    return
+  end
+  focus_active()
 end
 
 local function watch(win)

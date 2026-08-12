@@ -30,10 +30,27 @@ end
 -- behaves like a TUI as far as the PTY is concerned.
 function H.register_tool()
   -- Echoes its own terminal size whenever it receives a line, which lets the
-  -- suite assert the real PTY geometry rather than the window's.
+  -- suite assert the real PTY geometry rather than the window's. Also echoes
+  -- the line itself through `cat -v`, so control bytes fed to the PTY (the
+  -- <C-l> pass-through) show up as visible ^L text the suite can grep for.
   require("sidekick.config").cli.tools.zentest = {
-    cmd = { "sh", "-c", "printf 'ZENTEST READY\\n'; while read -r x; do stty size; done" },
+    cmd = { "sh", "-c", "printf 'ZENTEST READY\\n'; while read -r x; do stty size; printf 'GOT[%s]\\n' \"$x\" | cat -v; done" },
   }
+end
+
+-- Did the fake CLI receive a raw Ctrl-L on stdin? The tool renders it back
+-- as the literal text "GOT[^L]".
+function H.tui_got_ctrl_l()
+  local t = H.term()
+  if not (t and t:buf_valid()) then
+    return false
+  end
+  for _, l in ipairs(vim.api.nvim_buf_get_lines(t.buf, 0, -1, false)) do
+    if l:find("GOT[^L]", 1, true) then
+      return true
+    end
+  end
+  return false
 end
 
 -- Ask the CLI process how big its terminal actually is. This is the invariant

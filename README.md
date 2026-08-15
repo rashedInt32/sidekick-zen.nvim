@@ -10,7 +10,7 @@ https://github.com/user-attachments/assets/d3b49d0d-c8cb-4ed0-8b4d-e44eb7f6fc1c
 
 Because the usual ones break terminals. Neovim sizes a terminal's PTY to the *largest* window showing its buffer. Wrap your AI CLI in a zen plugin that opens a second view and the TUI renders at the wrong width and clips, inside an otherwise empty float.
 
-sidekick-zen never shows the terminal twice. It re-opens the sidekick terminal itself as a zen float, and switching views only raises one float above the backdrop and drops the other below it. Nothing resizes, so the TUI never reflows or flickers. The test suite asks the CLI process directly what size its terminal is, rather than trusting window widths.
+sidekick-zen never shows the terminal twice. It re-opens the sidekick terminal itself as a zen float, and switching views only raises one float and hides the other. A hidden window keeps its dimensions, so nothing resizes, the TUI never reflows, and a CLI streaming out of sight cannot flicker your cursor. The test suite asks the CLI process directly what size its terminal is, rather than trusting window widths.
 
 The scope is deliberately small: zen owns its own three floats and nothing else. It does not restructure your windows or write into them uninvited. Anything it cannot represent, such as a new split or another tabpage, closes the workspace rather than swallowing it.
 

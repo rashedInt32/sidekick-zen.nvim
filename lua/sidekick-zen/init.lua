@@ -5,12 +5,12 @@
 -- Switch keys flip between them from normal AND terminal mode, so you never
 -- leave the flow to juggle windows.
 --
--- Why views swap by zindex instead of opening or closing windows: nvim sizes
+-- Why views swap in place instead of opening or closing windows: nvim sizes
 -- a terminal's PTY to the LARGEST window showing its buffer. A second, wider
 -- view of the CLI makes its TUI render wider than the float it lives in, and
 -- clip. So the terminal float is kept as the only window on its buffer, and
--- swapping raises one float above the backdrop and drops the other below it.
--- Nothing resizes, so the TUI never reflows.
+-- swapping raises one float and hides the other. A hidden window keeps its
+-- dimensions, so nothing resizes and the TUI never reflows.
 --
 -- Scope, deliberately small: zen owns its own three floats and nothing else.
 -- It does not restructure, adopt, or write into your windows. Earlier
@@ -60,6 +60,9 @@ M.config = {
 -- The backdrop loses nothing by going down with it: floats always draw above
 -- ordinary windows whatever their zindex, and hiding ordinary windows is the
 -- only job the backdrop has.
+--
+-- `hidden` is the resting zindex of a float that is also `hide`d, so that
+-- revealing it never flashes it under the backdrop first.
 local Z = { top = 25, backdrop = 15, hidden = 5 }
 
 -- Sidekick clamps its own floats to this minimum (cli/terminal.lua). Asking
@@ -117,6 +120,14 @@ local function geo()
 end
 
 -- "solid" border = one cell of bg-colored padding all around.
+--
+-- The inactive view is `hide`d, not just dropped under the backdrop. A
+-- covered-but-open terminal float still forces a full redraw on every byte
+-- its TUI emits, and every redraw hides, repositions and re-shows the real
+-- cursor, so an AI CLI streaming in the background makes the cursor flicker
+-- around the screen. Hiding the window stops the redraws outright. nvim keeps
+-- a hidden window's dimensions, so the PTY still never resizes; zindex is
+-- kept alongside so layering is already right the moment a float is revealed.
 local function float_cfg(g, visible)
   return {
     relative = "editor",
@@ -126,6 +137,7 @@ local function float_cfg(g, visible)
     col = g.col,
     border = "solid",
     zindex = visible and Z.top or Z.hidden,
+    hide = not visible,
   }
 end
 
@@ -280,15 +292,20 @@ local function cli_ready()
   return cli_win() ~= nil and ws.term:is_running()
 end
 
--- zindex is a pure function of ws.view, applied in one place.
+-- Visibility is a pure function of ws.view, applied in one place.
 local function place()
   if not ws then
     return
   end
   local g = geo()
-  for _, item in ipairs({ { code_win(), "code" }, { cli_win(), "cli" } }) do
-    if item[1] then
-      vim.api.nvim_win_set_config(item[1], float_cfg(g, ws.view == item[2]))
+  local wins = { code = code_win(), cli = cli_win() }
+  -- Reveal the active float before hiding the other. Hiding the window the
+  -- cursor is in hands focus to whatever nvim picks next, and in zen that is
+  -- a window under the backdrop.
+  local order = ws.view == "code" and { "code", "cli" } or { "cli", "code" }
+  for _, view in ipairs(order) do
+    if wins[view] then
+      vim.api.nvim_win_set_config(wins[view], float_cfg(g, view == ws.view))
     end
   end
   if vim.api.nvim_win_is_valid(ws.backdrop) then

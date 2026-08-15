@@ -183,6 +183,15 @@ function H.zindex(win)
   return vim.api.nvim_win_get_config(win).zindex
 end
 
+-- The inactive view must be `hide`d, not merely lowered: an open float still
+-- forces a redraw on every byte its terminal emits, which flickers the cursor.
+function H.hidden(win)
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    return nil
+  end
+  return vim.api.nvim_win_get_config(win).hide == true
+end
+
 function H.cur()
   return vim.api.nvim_get_current_win()
 end

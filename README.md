@@ -84,6 +84,8 @@ Zen steps aside rather than hiding things from you. It closes itself when you le
 
 It prefers a real file to mirror. Toggle from a sidebar or quickfix window and you get the nearest file window instead, or an empty scratch canvas if there is none. That canvas is discarded on exit unless you typed in it, in which case it is kept and listed.
 
+Popups stay on top. Zen sits at the bottom of the float stack, under every zindex popups are known to use, so LSP hover, signature help, completion menus and pickers render over the workspace instead of behind it. The backdrop loses nothing by going down there too: floats always draw above ordinary windows whatever their zindex, and hiding ordinary windows is the only job it has.
+
 Navigating inside zen carries back to the window you came from, but only while that window is still an ordinary file window showing what it showed when zen opened. Anything else is yours, and zen leaves it alone.
 
 > [!NOTE]

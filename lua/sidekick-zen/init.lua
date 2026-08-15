@@ -45,7 +45,22 @@ M.config = {
   backdrop_bg = nil,
 }
 
-local Z = { top = 50, backdrop = 40, hidden = 30 }
+-- Zen deliberately sits at the BOTTOM of the float stack, not the top.
+--
+-- It used to sit at 50, which is nvim_open_win()'s default and where most
+-- popups land, and zen won the tie: LSP hover, signature help and picker
+-- previews all opened underneath the code view, invisible. Nothing you can
+-- read is worth covering, so the fix is not a bigger number but a smaller
+-- one. Surveying the popups in the wild, the whole cluster starts at 30
+-- (snacks layout 30, snacks picker preview 40, mason 44, noice hover 45,
+-- oil 45, nui 50, nvim's own default 50, notify 65, blink 1001). A top float
+-- at 25 slides under all of it, so every popup shows over zen without any of
+-- them needing to know zen exists.
+--
+-- The backdrop loses nothing by going down with it: floats always draw above
+-- ordinary windows whatever their zindex, and hiding ordinary windows is the
+-- only job the backdrop has.
+local Z = { top = 25, backdrop = 15, hidden = 5 }
 
 -- Sidekick clamps its own floats to this minimum (cli/terminal.lua). Asking
 -- for less leaves its float wider than the geometry we push on later swaps,

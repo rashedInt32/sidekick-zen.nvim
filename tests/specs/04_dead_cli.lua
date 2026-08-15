@@ -17,7 +17,7 @@ H.check("cli process is dead", not H.term():is_running())
 local ok, err = pcall(H.key(Z.config.keys.cli))
 vim.wait(300)
 H.check("switching to a dead cli does not error", ok, tostring(err))
-H.check("code view stayed raised", H.zindex(cw) == 50, "z=" .. tostring(H.zindex(cw)))
+H.check("code view stayed raised", H.zindex(cw) == H.Z.top, "z=" .. tostring(H.zindex(cw)))
 H.check("cursor stayed on the code view", H.cur() == cw, "cur=" .. tostring(H.cur()))
 
 Z.toggle()

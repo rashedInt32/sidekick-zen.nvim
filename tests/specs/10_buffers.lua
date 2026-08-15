@@ -41,7 +41,7 @@ H.check(
   H.buf_name(H.code_win())
 )
 H.check("focus pulled back above the backdrop", H.cur() == H.code_win(), "cur=" .. tostring(H.cur()))
-H.check("code view raised after adoption", H.zindex(H.code_win()) == 50)
+H.check("code view raised after adoption", H.zindex(H.code_win()) == H.Z.top)
 
 Z.toggle()
 vim.wait(600)

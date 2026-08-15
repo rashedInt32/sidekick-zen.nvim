@@ -19,7 +19,7 @@ H.check("no cli float", H.term_win() == nil)
 local ok, err = pcall(H.key(Z.config.keys.cli))
 vim.wait(300)
 H.check("asking for the cli warns instead of erroring", ok, tostring(err))
-H.check("still on the code view", H.code_win() ~= nil and H.zindex(H.code_win()) == 50)
+H.check("still on the code view", H.code_win() ~= nil and H.zindex(H.code_win()) == H.Z.top)
 
 Z.toggle()
 vim.wait(500)

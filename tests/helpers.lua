@@ -169,6 +169,13 @@ function H.term_wins()
   return out
 end
 
+-- Mirrors the plugin's own band. It sits under the whole popup cluster, which
+-- starts at 30 in the wild, so hovers and pickers draw over zen, not under it.
+H.Z = { top = 25, backdrop = 15, hidden = 5 }
+-- The lowest zindex a popup is known to use (snacks layout). Zen must lose to
+-- it, and to everything above it.
+H.LOWEST_POPUP = 30
+
 function H.zindex(win)
   if not win or not vim.api.nvim_win_is_valid(win) then
     return nil
@@ -190,7 +197,7 @@ function H.zen_floats()
   local out = {}
   for _, w in ipairs(vim.api.nvim_list_wins()) do
     local c = vim.api.nvim_win_get_config(w)
-    if c.relative ~= "" and (c.zindex == 50 or c.zindex == 40 or c.zindex == 30) then
+    if c.relative ~= "" and (c.zindex == H.Z.top or c.zindex == H.Z.backdrop or c.zindex == H.Z.hidden) then
       table.insert(out, { win = w, z = c.zindex, width = c.width })
     end
   end
@@ -200,7 +207,7 @@ end
 function H.code_win()
   local tw = H.term_win()
   for _, f in ipairs(H.zen_floats()) do
-    if f.win ~= tw and f.z ~= 40 then
+    if f.win ~= tw and f.z ~= H.Z.backdrop then
       return f.win
     end
   end
@@ -209,7 +216,7 @@ end
 
 function H.backdrop()
   for _, f in ipairs(H.zen_floats()) do
-    if f.z == 40 then
+    if f.z == H.Z.backdrop then
       return f.win
     end
   end

@@ -40,7 +40,7 @@ for i = 1, 4 do
   vim.wait(300)
   H.check(
     "cursor on a raised view after walk " .. i,
-    H.zindex(H.cur()) == 50,
+    H.zindex(H.cur()) == H.Z.top,
     "cur=" .. tostring(H.cur()) .. " z=" .. tostring(H.zindex(H.cur()))
   )
 end

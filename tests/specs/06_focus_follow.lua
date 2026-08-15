@@ -12,6 +12,10 @@ H.key(Z.config.keys.cli)()
 vim.wait(400)
 H.check("on the cli view", H.cur() == H.term_win())
 
+-- sidekick's blur() is `wincmd p`, which skips hidden windows. This is what
+-- catches the code float being `hide`d rather than merely covered: blur then
+-- cannot reach it, the cursor stays in the CLI, and no WinEnter fires to swap
+-- the view.
 require("sidekick.cli").focus() -- focused, so this blurs
 vim.wait(500)
 local cw = H.code_win()

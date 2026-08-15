@@ -9,8 +9,8 @@
 -- a terminal's PTY to the LARGEST window showing its buffer. A second, wider
 -- view of the CLI makes its TUI render wider than the float it lives in, and
 -- clip. So the terminal float is kept as the only window on its buffer, and
--- swapping raises one float and hides the other. A hidden window keeps its
--- dimensions, so nothing resizes and the TUI never reflows.
+-- swapping raises one float and puts the other away. Neither window is ever
+-- resized or reopened, so the TUI never reflows.
 --
 -- Scope, deliberately small: zen owns its own three floats and nothing else.
 -- It does not restructure, adopt, or write into your windows. Earlier
@@ -61,8 +61,9 @@ M.config = {
 -- ordinary windows whatever their zindex, and hiding ordinary windows is the
 -- only job the backdrop has.
 --
--- `hidden` is the resting zindex of a float that is also `hide`d, so that
--- revealing it never flashes it under the backdrop first.
+-- `hidden` is where an inactive float rests: below the backdrop, so it is
+-- covered whether or not it is also `hide`d, and so revealing it never
+-- flashes it under the backdrop first.
 local Z = { top = 25, backdrop = 15, hidden = 5 }
 
 -- Sidekick clamps its own floats to this minimum (cli/terminal.lua). Asking
@@ -121,13 +122,9 @@ end
 
 -- "solid" border = one cell of bg-colored padding all around.
 --
--- The inactive view is `hide`d, not just dropped under the backdrop. A
--- covered-but-open terminal float still forces a full redraw on every byte
--- its TUI emits, and every redraw hides, repositions and re-shows the real
--- cursor, so an AI CLI streaming in the background makes the cursor flicker
--- around the screen. Hiding the window stops the redraws outright. nvim keeps
--- a hidden window's dimensions, so the PTY still never resizes; zindex is
--- kept alongside so layering is already right the moment a float is revealed.
+-- An inactive float is dropped below the backdrop, where it is invisible but
+-- still an ordinary window. Only the CLI is also `hide`d, and only the CLI:
+-- see cli_float_cfg.
 local function float_cfg(g, visible)
   return {
     relative = "editor",
@@ -137,14 +134,29 @@ local function float_cfg(g, visible)
     col = g.col,
     border = "solid",
     zindex = visible and Z.top or Z.hidden,
-    hide = not visible,
+    hide = false,
   }
 end
 
 -- The blank title overrides sidekick's default " Sidekick " (nvim rejects a
 -- title without a border, so it can't simply be dropped).
+--
+-- The inactive CLI is `hide`d rather than merely covered. A covered-but-open
+-- terminal float still forces a full redraw on every byte its TUI emits, and
+-- every redraw hides, repositions and re-shows the real cursor, so an AI CLI
+-- streaming in the background makes the cursor flicker around the screen.
+-- Hiding the window stops the redraws outright. nvim keeps a hidden window's
+-- dimensions, so the PTY still never resizes; zindex is kept in step so
+-- layering is already right the moment the float is revealed.
+--
+-- The code float is deliberately NOT hidden, because nothing is gained and
+-- something is lost. A static file emits no bytes, so there are no redraws to
+-- suppress, while `wincmd p` skips hidden windows entirely. Sidekick's blur()
+-- IS `wincmd p`: with the code float hidden, blurring the CLI could not reach
+-- it, so the cursor stayed put, no WinEnter fired, and zen never swapped the
+-- view. Covered-but-open leaves it a legal window to jump into.
 local function cli_float_cfg(g, visible)
-  return vim.tbl_extend("force", float_cfg(g, visible), { title = " " })
+  return vim.tbl_extend("force", float_cfg(g, visible), { title = " ", hide = not visible })
 end
 
 local function backdrop_cfg()
@@ -305,7 +317,8 @@ local function place()
   local order = ws.view == "code" and { "code", "cli" } or { "cli", "code" }
   for _, view in ipairs(order) do
     if wins[view] then
-      vim.api.nvim_win_set_config(wins[view], float_cfg(g, view == ws.view))
+      local cfg = view == "cli" and cli_float_cfg or float_cfg
+      vim.api.nvim_win_set_config(wins[view], cfg(g, view == ws.view))
     end
   end
   if vim.api.nvim_win_is_valid(ws.backdrop) then

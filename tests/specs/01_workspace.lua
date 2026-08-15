@@ -15,7 +15,7 @@ H.check("entered on the code view", H.cur() == cw, "cur=" .. tostring(H.cur()))
 H.check("code float raised", H.zindex(cw) == H.Z.top, "z=" .. tostring(H.zindex(cw)))
 H.check("cli float lowered", H.zindex(H.term_win()) == H.Z.hidden, "z=" .. tostring(H.zindex(H.term_win())))
 H.check("code float visible", H.hidden(cw) == false)
-H.check("cli float actually hidden, not just covered", H.hidden(H.term_win()) == true)
+H.check("inactive cli actually hidden, not just covered", H.hidden(H.term_win()) == true)
 H.check("backdrop present", H.backdrop() ~= nil)
 H.check("terminal in exactly one window", #H.term_wins() == 1, vim.inspect(H.term_wins()))
 local zen_w = vim.api.nvim_win_get_width(H.term_win())
@@ -26,7 +26,9 @@ H.check("swapped to the cli view", H.cur() == H.term_win())
 H.check("cli raised", H.zindex(H.term_win()) == H.Z.top)
 H.check("code lowered", H.zindex(cw) == H.Z.hidden)
 H.check("cli float revealed by the swap", H.hidden(H.term_win()) == false)
-H.check("code float hidden by the swap", H.hidden(cw) == true)
+-- Never hidden, only covered: `wincmd p` skips hidden windows, and sidekick's
+-- blur() is `wincmd p`. Hiding this float stranded the cursor in the CLI.
+H.check("inactive code float covered but still reachable", H.hidden(cw) == false)
 H.check(
   "terminal not resized by the swap",
   vim.api.nvim_win_get_width(H.term_win()) == zen_w,

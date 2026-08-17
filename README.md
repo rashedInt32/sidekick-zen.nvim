@@ -86,6 +86,8 @@ It prefers a real file to mirror. Toggle from a sidebar or quickfix window and y
 
 Popups stay on top. Zen sits at the bottom of the float stack, under every zindex popups are known to use, so LSP hover, signature help, completion menus and pickers render over the workspace instead of behind it. The backdrop loses nothing by going down there too: floats always draw above ordinary windows whatever their zindex, and hiding ordinary windows is the only job it has.
 
+Your gutter comes with you. The code float mirrors `number`, `signcolumn`, `foldcolumn` and friends from the window you toggled out of, so it lines up with every other window in the session. An `auto` width is pinned open instead: under `auto` the column only exists while it has something to show, so the first gitsign or diagnostic would push the whole file a column to the right.
+
 Navigating inside zen carries back to the window you came from, but only while that window is still an ordinary file window showing what it showed when zen opened. Anything else is yours, and zen leaves it alone.
 
 > [!NOTE]

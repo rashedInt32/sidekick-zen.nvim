@@ -479,6 +479,47 @@ local function borrow_cli_windows(term, stale)
   return borrowed
 end
 
+-- `style = "minimal"` does not merely blank the gutter, it forces 'signcolumn'
+-- to `auto`: no reserved column until a sign exists, so the first gitsign or
+-- diagnostic shoves every line one column right. In a view whose whole selling
+-- point is stillness, that shove is the loudest thing on screen.
+--
+-- So the code float mirrors the gutter of the window zen was opened from,
+-- which is the one the user already tuned, instead of minimal's opinion.
+local GUTTER = { "number", "relativenumber", "numberwidth", "signcolumn", "foldcolumn", "statuscolumn" }
+
+-- `auto` widths are the shift itself: the column exists only while it has
+-- something to show. Pin them open at the widest they could ever grow, so the
+-- signs arrive into space that was already there.
+local function reserve(opt, value)
+  if type(value) ~= "string" or not value:find("^auto") then
+    return value
+  end
+  -- The trailing digit of "auto:2" or "auto:1-3" is its maximum.
+  local width = value:match("(%d)$")
+  if opt == "signcolumn" then
+    return width and ("yes:" .. width) or "yes"
+  end
+  -- 'foldcolumn' has no "yes", only a count.
+  return width or "1"
+end
+
+local function mirror_gutter(win, src)
+  -- Zen from a lone CLI has no source window, so fall back to the globals a
+  -- fresh split would have inherited.
+  local from = (src and vim.api.nvim_win_is_valid(src)) and vim.wo[src] or vim.go
+  for _, opt in ipairs(GUTTER) do
+    local ok, value = pcall(function()
+      return from[opt]
+    end)
+    if ok then
+      pcall(function()
+        vim.wo[win][opt] = reserve(opt, value)
+      end)
+    end
+  end
+end
+
 local function enter()
   vim.api.nvim_clear_autocmds({ group = ws_group })
 
@@ -514,6 +555,7 @@ local function enter()
   -- would open files in a window under the backdrop; this marker whitelists
   -- the zen float, the same trick Snacks.zen uses.
   vim.w[code_win_id].snacks_main = true
+  mirror_gutter(code_win_id, entry_win)
   vim.wo[code_win_id].winhighlight =
     "NormalFloat:SidekickZenBg,FloatBorder:SidekickZenBg,EndOfBuffer:SidekickZenBg,SignColumn:SidekickZenBg"
   if entry_win then

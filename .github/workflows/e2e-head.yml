@@ -1,0 +1,25 @@
+name: e2e (sidekick HEAD)
+
+# The PR gate pins sidekick.nvim to the tested revision, so it cannot see
+# upstream drift. This run clones sidekick main and reports what breaks,
+# weekly and on demand, without blocking anyone's change.
+
+on:
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Run the end-to-end suite against sidekick main
+        # No SIDEKICK_REF: minimal_init clones HEAD when it is unset.
+        run: tests/run.sh

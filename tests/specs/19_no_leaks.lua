@@ -9,7 +9,7 @@ H.layout()
 vim.wait(300)
 local base = H.counts()
 
-for i = 1, 5 do
+for _ = 1, 5 do
   Z.toggle()
   vim.wait(350)
   Z.toggle()
@@ -23,7 +23,7 @@ H.check("no autocmds leaked", after.autocmds == 0, "n=" .. after.autocmds)
 H.check("no keymaps leaked", after.maps == base.maps, after.maps .. " want " .. base.maps)
 
 -- the same, but exiting through the CLI view each time
-for i = 1, 3 do
+for _ = 1, 3 do
   Z.toggle()
   vim.wait(350)
   H.key(Z.config.keys.cli)()

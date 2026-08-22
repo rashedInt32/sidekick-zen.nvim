@@ -31,8 +31,25 @@ jobs:
             -c "lua require('sidekick-zen').setup({}); require('sidekick-zen.health')" \
             -c "lua print('load ok')" -c "qa!"
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install luacheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luarocks
+          sudo luarocks install luacheck
+      - name: Lint
+        run: luacheck .
+
   e2e:
     runs-on: ubuntu-latest
+    env:
+      # The revision sidekick-zen is tested against (see README). PRs stay on
+      # it so an upstream sidekick change cannot fail your change; drift is
+      # caught by the scheduled HEAD run instead.
+      SIDEKICK_REF: 208e1c5
     steps:
       - uses: actions/checkout@v4
       - uses: rhysd/action-setup-vim@v1

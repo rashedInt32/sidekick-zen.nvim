@@ -76,6 +76,7 @@ local MIN = { width = 80, height = 10 }
 ---@field tab integer tabpage the floats live in
 ---@field code_win integer
 ---@field code_scratch? integer buffer zen created because nothing was suitable
+---@field gutter table<string, any> mirrored gutter, re-applied on every buffer swap
 ---@field entry_win? integer window to refocus on exit; never written into blindly
 ---@field entry_buf integer buffer the code view opened on
 ---@field backdrop integer
@@ -504,19 +505,39 @@ local function reserve(opt, value)
   return width or "1"
 end
 
-local function mirror_gutter(win, src)
+-- Snapshot rather than read on demand: the window zen was opened from is under
+-- the backdrop for the whole session and may be gone by the time a second file
+-- lands in the float.
+local function gutter_of(src)
   -- Zen from a lone CLI has no source window, so fall back to the globals a
   -- fresh split would have inherited.
   local from = (src and vim.api.nvim_win_is_valid(src)) and vim.wo[src] or vim.go
+  local out = {}
   for _, opt in ipairs(GUTTER) do
     local ok, value = pcall(function()
       return from[opt]
     end)
     if ok then
-      pcall(function()
-        vim.wo[win][opt] = reserve(opt, value)
-      end)
+      out[opt] = reserve(opt, value)
     end
+  end
+  return out
+end
+
+-- `style = "minimal"` is sticky, not a one-time stamp: nvim re-derives the
+-- whole gutter from it every time a buffer enters the window, so applying the
+-- mirror once at open lasts exactly until you jump to a second file, and the
+-- shift comes back. Nothing survives that reset -- not `vim.wo`, not `:set` in
+-- the window, not `nvim_set_option_value` -- so the mirror is re-applied on
+-- every buffer swap instead.
+local function apply_gutter(win, gutter)
+  if not (gutter and win and vim.api.nvim_win_is_valid(win)) then
+    return
+  end
+  for opt, value in pairs(gutter) do
+    pcall(function()
+      vim.wo[win][opt] = value
+    end)
   end
 end
 
@@ -555,7 +576,8 @@ local function enter()
   -- would open files in a window under the backdrop; this marker whitelists
   -- the zen float, the same trick Snacks.zen uses.
   vim.w[code_win_id].snacks_main = true
-  mirror_gutter(code_win_id, entry_win)
+  local gutter = gutter_of(entry_win)
+  apply_gutter(code_win_id, gutter)
   vim.wo[code_win_id].winhighlight =
     "NormalFloat:SidekickZenBg,FloatBorder:SidekickZenBg,EndOfBuffer:SidekickZenBg,SignColumn:SidekickZenBg"
   if entry_win then
@@ -570,6 +592,7 @@ local function enter()
     tab = vim.api.nvim_get_current_tabpage(),
     code_win = code_win_id,
     code_scratch = code_scratch,
+    gutter = gutter,
     entry_win = entry_win,
     entry_buf = code_buf,
     backdrop = open_backdrop(),
@@ -607,6 +630,9 @@ local function enter()
       end
       local cur = vim.api.nvim_get_current_win()
       if cur == cw then
+        -- Before the early return: minimal has already reset the gutter by the
+        -- time this fires, whether or not the buffer is one we have seen.
+        apply_gutter(cw, ws.gutter)
         if ev.buf == ws.entry_buf then
           return
         end
@@ -626,6 +652,8 @@ local function enter()
         -- one window: anything newly created is handled by WinNew instead.
         local cursor = vim.api.nvim_win_get_cursor(cur)
         vim.api.nvim_win_set_buf(cw, ev.buf)
+        -- Our own swap, so no nested BufWinEnter reaches the branch above.
+        apply_gutter(cw, ws.gutter)
         ws.entry_buf = ev.buf
         pcall(vim.api.nvim_win_set_cursor, cw, cursor)
         center(cw)

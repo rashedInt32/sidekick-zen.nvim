@@ -41,6 +41,22 @@ local after = textoff(cw)
 H.check("code does not shift when a sign lands", before == after, before .. " -> " .. after)
 vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
 
+-- `style = "minimal"` re-derives the whole gutter every time a buffer enters
+-- the window, so the mirror has to survive a second file, not just the first.
+vim.api.nvim_set_current_win(cw)
+vim.cmd("silent! edit! " .. H.dir .. "/beta.txt")
+vim.wait(300)
+cw = H.code_win()
+H.check("gutter survives opening another file", cw and vim.wo[cw].signcolumn == "yes", cw and vim.wo[cw].signcolumn)
+local swapped = textoff(cw)
+H.check("gutter still reserved after the swap", swapped == before, before .. " -> " .. swapped)
+
+local buf2 = vim.api.nvim_win_get_buf(cw)
+vim.api.nvim_buf_set_extmark(buf2, ns, 0, 0, { sign_text = "E>" })
+vim.wait(200)
+H.check("no shift on the second file either", textoff(cw) == swapped, swapped .. " -> " .. textoff(cw))
+vim.api.nvim_buf_clear_namespace(buf2, ns, 0, -1)
+
 Z.toggle()
 vim.wait(500)
 H.no_workspace_left()

@@ -218,10 +218,21 @@ end
 -- Fired at the very end of enter and of exit, when the workspace is fully
 -- built or fully gone, so a handler always sees a settled state.
 --
--- pcall'd because a handler is user code, and an error in one must not abandon
--- a half-open workspace or skip the rest of teardown.
+-- Fired under `:silent!` because a handler is user code, and an error in one
+-- must not abandon a half-open workspace or skip the rest of teardown. pcall
+-- is not enough: a throwing callback is reported through nvim's message
+-- machinery, not raised into Lua, so it sails past pcall and fails whatever
+-- surrounds the fire, e.g. the RPC request a test runner drives nvim with.
+-- `:silent!` discards the error at that level; later handlers still run.
+local fire_payload
+function M._fire()
+  vim.api.nvim_exec_autocmds("User", fire_payload)
+end
+
 local function fire(event, data)
-  pcall(vim.api.nvim_exec_autocmds, "User", { pattern = event, modeline = false, data = data })
+  fire_payload = { pattern = event, modeline = false, data = data }
+  vim.cmd("silent! lua require('sidekick-zen')._fire()")
+  fire_payload = nil
 end
 
 local function count_normal_wins()

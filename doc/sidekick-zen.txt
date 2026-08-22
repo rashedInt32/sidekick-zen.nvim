@@ -1,0 +1,126 @@
+*sidekick-zen.txt*	Zen mode that takes your AI along
+
+Author:	rashedInt32
+License:	MIT
+
+==============================================================================
+INTRODUCTION						*sidekick-zen*
+
+One toggle drops your code and your sidekick.nvim CLI (Claude Code, Codex,
+Gemini, ...) into a clean, centered, distraction-free workspace. Switch keys
+flip between the two views from normal AND terminal mode, straight from the
+CLI's input box.
+
+The terminal float is kept as the only window on its buffer: Neovim sizes a
+terminal's PTY to the largest window showing it, so a second, wider view
+would make the TUI render past its float and clip. Switching views raises
+one float and puts the other away; nothing is ever resized or reopened.
+
+Scope is deliberately small: zen owns its own three floats and nothing else.
+Anything it cannot represent, such as a new split or another tabpage, closes
+the workspace rather than being absorbed.
+
+Requirements:	Neovim 0.10+
+		folke/sidekick.nvim (optional, code-only zen without it)
+
+==============================================================================
+SETUP							*sidekick-zen.setup()*
+
+	require("sidekick-zen").setup({opts})
+
+Merges {opts} into the defaults. Can be called again to change options while
+running. Defaults and their meaning:
+
+	width		Fraction of the editor width, or absolute columns
+			if > 1.				(default 0.8)
+	keys.code	Key that shows the code view, normal + terminal
+			mode while zen is open.		(default "<C-h>")
+	keys.cli	Key that shows the CLI view. Pressed again while
+			typing in the CLI, it passes through to the TUI,
+			so <C-l> still reaches Claude Code's repaint.
+							(default "<C-l>")
+	keys.exit	Exits zen from normal mode in either view. Shadows
+			macro recording while zen is active; set to false
+			if you record macros there.	(default "q")
+	hijack_hide_keys Remaps sidekick's hide keys (`q` and `<c-.>`) on
+			the CLI buffer to switch views instead of tearing
+			the workspace down. Set false if you rebound
+			sidekick's hide keys.		(default true)
+	backdrop_bg	Backdrop colour, anything |nvim_set_hl()| accepts
+			for `bg`. Defaults to the CLI's own background,
+			falling back to Normal, so it tracks your theme.
+			A transparent colorscheme yields a transparent
+			backdrop; pass "none" to force that on any theme.
+							(default nil)
+
+==============================================================================
+COMMANDS						*sidekick-zen-commands*
+
+:SidekickZen						*:SidekickZen*
+	Toggle the zen workspace.
+
+==============================================================================
+KEYS							*sidekick-zen-keys*
+
+<C-h>	Show the code view. Zen, normal and terminal mode.
+<C-l>	Show the CLI view. Pressed again while typing in the CLI, the key
+	passes through to the TUI instead (Claude Code repaints on <C-l>).
+q	Exit zen. Normal mode, either view.
+<c-.>	Switch to the code view instead of hiding the CLI.
+
+Terminal-mode switching lives on the CLI's own buffer, so any other
+terminal you open keeps its own <C-h>/<C-l>.
+
+Sidekick's own actions (send, prompt, focus) raise the CLI view
+automatically, so context lands where you can see it.
+
+==============================================================================
+API							*sidekick-zen-api*
+
+sidekick-zen.toggle()				*sidekick-zen.toggle()*
+	Open the workspace when none is active, otherwise close it.
+
+sidekick-zen.exit()					*sidekick-zen.exit()*
+	Close the workspace if one is open. No-op otherwise.
+
+sidekick-zen.is_active()			*sidekick-zen.is_active()*
+	Returns true while a zen workspace is open.
+
+==============================================================================
+EVENTS							*sidekick-zen-events*
+
+Zen fires two |User| autocmds so your config can dress the rest of its UI
+to match. Errors in handlers are caught and cannot strand a workspace.
+
+User SidekickZenOpen				*SidekickZenOpen*
+	Fired once the workspace is fully built.
+	ev.data = { view, tab, code_win, cli_win }
+	`cli_win` is nil without a CLI session.
+
+User SidekickZenClose				*SidekickZenClose*
+	Fired once the floats are gone and focus has landed back where you
+	came from.
+	ev.data = { tab }
+
+Every close pairs with an open. Switching views fires neither.
+
+>
+	vim.api.nvim_create_autocmd("User", {
+	  pattern = "SidekickZenOpen",
+	  callback = function(ev)
+	    vim.o.laststatus = 0
+	  end,
+	})
+	vim.api.nvim_create_autocmd("User", {
+	  pattern = "SidekickZenClose",
+	  callback = function()
+	    vim.o.laststatus = 2
+	  end,
+	})
+<
+
+Zen recomputes its geometry when `laststatus` or `cmdheight` changes, so a
+handler freeing a row resizes the floats to fill it.
+
+==============================================================================
+vim:tw=78:ts=8:noet:ft=help:norl:

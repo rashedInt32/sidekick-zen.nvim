@@ -1,0 +1,13 @@
+:SidekickZen	sidekick-zen.txt	/*:SidekickZen*
+SidekickZenClose	sidekick-zen.txt	/*SidekickZenClose*
+SidekickZenOpen	sidekick-zen.txt	/*SidekickZenOpen*
+sidekick-zen	sidekick-zen.txt	/*sidekick-zen*
+sidekick-zen-api	sidekick-zen.txt	/*sidekick-zen-api*
+sidekick-zen-commands	sidekick-zen.txt	/*sidekick-zen-commands*
+sidekick-zen-events	sidekick-zen.txt	/*sidekick-zen-events*
+sidekick-zen-keys	sidekick-zen.txt	/*sidekick-zen-keys*
+sidekick-zen.exit()	sidekick-zen.txt	/*sidekick-zen.exit()*
+sidekick-zen.is_active()	sidekick-zen.txt	/*sidekick-zen.is_active()*
+sidekick-zen.setup()	sidekick-zen.txt	/*sidekick-zen.setup()*
+sidekick-zen.toggle()	sidekick-zen.txt	/*sidekick-zen.toggle()*
+sidekick-zen.txt	sidekick-zen.txt	/*sidekick-zen.txt*

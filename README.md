@@ -49,6 +49,8 @@ Needs Neovim 0.10+ and sidekick.nvim (works without it too, you just get code-on
 
 Enter from code and you see code first. Enter from the sidekick window and you land on the CLI, cursor in its input box. `:SidekickZen` toggles too.
 
+Terminal-mode switching lives on the CLI's own buffer, so any other terminal you open keeps its `<C-h>`/`<C-l>`.
+
 The pass-through matters for Claude Code: its input box sometimes drifts and leaves a ghost copy of itself behind, and `<C-l>` is its repaint command. Since the switch key only *switches* when you are elsewhere, pressing it once more inside the CLI hands the real `<C-l>` to Claude and cleans the screen up.
 
 Sidekick's own keymaps play along: sending `{this}`, `{file}`, or a selection, picking a prompt, or focusing the CLI all raise the CLI view automatically, so the context lands where you can see it.
@@ -77,6 +79,33 @@ require("sidekick-zen").setup({
   backdrop_bg = nil, -- e.g. "#0d1522"
 })
 ```
+
+The backdrop follows your theme rather than fighting it: with a transparent colorscheme it stays transparent too. `backdrop_bg = "none"` forces that on any theme.
+
+### Events
+
+Zen fires two `User` autocmds, so you can dress the rest of your UI to match without the plugin having to know about it:
+
+```lua
+vim.api.nvim_create_autocmd("User", {
+  pattern = "SidekickZenOpen", -- ev.data = { view, tab, code_win, cli_win }
+  callback = function(ev)
+    vim.wo[ev.data.code_win].cursorline = false
+    vim.o.laststatus = 0
+  end,
+})
+
+vim.api.nvim_create_autocmd("User", {
+  pattern = "SidekickZenClose", -- ev.data = { tab }
+  callback = function()
+    vim.o.laststatus = 2
+  end,
+})
+```
+
+`SidekickZenOpen` fires once the workspace is fully built, `SidekickZenClose` once the floats are gone and focus has landed back where you came from. Every close pairs with an open, and switching views fires neither. An error in your handler is caught, so a broken one cannot strand a half-open workspace.
+
+`cli_win` is `nil` when you have no CLI session. Zen recomputes its geometry when `laststatus` or `cmdheight` changes, so the example above resizes the floats to fill the freed row rather than leaving a gap.
 
 ### Behaviour worth knowing
 

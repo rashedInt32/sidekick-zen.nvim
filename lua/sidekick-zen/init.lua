@@ -81,9 +81,10 @@ local MIN = { width = 80, height = 10 }
 ---@field entry_buf integer buffer the code view opened on
 ---@field backdrop integer
 ---@field normal_wins integer non-floating window count when the workspace opened
----@field borrowed { win: integer, buf: integer }[] windows whose buffer zen swapped out
+---@field borrowed { win: integer, buf: integer, stale?: boolean }[] windows whose buffer zen swapped out
 ---@field term? sidekick.cli.Terminal
 ---@field term_was_open? boolean
+---@field announced? boolean SidekickZenOpen fired; every close must pair with one
 ---@field saved? { layout: string, float: vim.api.keyset.win_config }
 
 ---@type sidekick.zen.Workspace?
@@ -204,6 +205,23 @@ end
 
 local function is_float(win)
   return vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_config(win).relative ~= ""
+end
+
+-- Lifecycle events, so a config can react to zen without the plugin having to
+-- own an opinion about statuslines, 'cursorline' or diagnostic signs:
+--
+--   vim.api.nvim_create_autocmd("User", {
+--     pattern = "SidekickZenOpen",  -- ev.data = { view, tab, code_win, cli_win }
+--     callback = function(ev) ... end,
+--   })
+--
+-- Fired at the very end of enter and of exit, when the workspace is fully
+-- built or fully gone, so a handler always sees a settled state.
+--
+-- pcall'd because a handler is user code, and an error in one must not abandon
+-- a half-open workspace or skip the rest of teardown.
+local function fire(event, data)
+  pcall(vim.api.nvim_exec_autocmds, "User", { pattern = event, modeline = false, data = data })
 end
 
 local function count_normal_wins()
@@ -766,6 +784,14 @@ local function enter()
   else
     vim.api.nvim_set_current_win(code_win_id)
   end
+
+  -- Guarded: focusing runs WinEnter handlers, and one of them can tear the
+  -- workspace down before it was ever fully open. Nothing opened, so nothing
+  -- to announce, and the flag keeps exit from announcing a close to match.
+  if ws then
+    ws.announced = true
+    fire("SidekickZenOpen", { view = ws.view, tab = ws.tab, code_win = code_win(), cli_win = cli_win() })
+  end
 end
 
 function M.exit()
@@ -862,6 +888,19 @@ function M.exit()
   if same_tab and entry_win and vim.api.nvim_win_is_valid(entry_win) then
     pcall(vim.api.nvim_set_current_win, entry_win)
   end
+
+  -- Last, once the floats are gone and focus has landed, so a handler
+  -- restoring options sees the layout it is restoring for. Only if the
+  -- matching open was announced: every close pairs with an open.
+  if s.announced then
+    fire("SidekickZenClose", { tab = s.tab })
+  end
+end
+
+---True while a zen workspace is open, false otherwise.
+---@return boolean
+function M.is_active()
+  return ws ~= nil
 end
 
 function M.toggle()

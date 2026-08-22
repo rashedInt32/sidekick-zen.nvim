@@ -419,8 +419,13 @@ local function watch(win)
   })
 end
 
+-- Global scope is normal mode only: the code float swaps buffers as you
+-- navigate, so its switch keys cannot live on any one buffer. Terminal mode
+-- is scoped to the CLI buffer alone -- a global t-map would eat <C-h>/<C-l>
+-- inside every other terminal open in the tabpage, and those keystrokes
+-- belong to whatever TUI the user is typing into.
 local function map_views(buf)
-  for _, mode in ipairs({ "n", "t" }) do
+  for _, mode in ipairs(buf and { "n", "t" } or { "n" }) do
     push_map(mode, M.config.keys.code, function()
       show_view("code")
     end, { buffer = buf, desc = "Zen: code view" })

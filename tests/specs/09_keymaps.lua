@@ -34,6 +34,20 @@ end)
 H.check("terminal q hijacked", tin.q.desc == "Zen: exit", tostring(tin.q.desc))
 H.check("terminal nav key hijacked", tin.nav.desc == "Zen: code view", tostring(tin.nav.desc))
 
+-- Terminal-mode switching lives on the CLI buffer alone. A global t-map
+-- would eat <C-h>/<C-l> inside every other terminal open in the tabpage,
+-- and those keystrokes belong to whatever TUI the user is typing into.
+-- maparg() here resolves against the current (non-terminal) buffer, so a
+-- hit means the override leaked into global scope.
+for _, k in ipairs({ Z.config.keys.code, Z.config.keys.cli }) do
+  local leaked = vim.fn.maparg(k, "t", false, true).desc
+  H.check(
+    "terminal " .. k .. " stays off the global scope",
+    leaked ~= "Zen: code view" and leaked ~= "Zen: CLI view",
+    tostring(leaked)
+  )
+end
+
 -- exit from the CLI view through the hijacked q
 H.key(Z.config.keys.cli)()
 vim.wait(400)
